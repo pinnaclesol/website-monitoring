@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+
+# build outputs
+dist/
+.next/
+out/
+build/
+
+# env files (keep examples)
+*.env
+!*.env.example
+
+# Prisma generated client
+libs/uptime-db/src/generated/
+libs/uptime-db/prisma/generated/
+
+# Nx
+.nx/cache/
+.nx/workspace-data/
+nx-cloud.env
+
+# testing
+coverage/
+
+# logs
+*.log
+npm-debug.log*
+
+# TypeScript build info
+*.tsbuildinfo
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# misc
+*.local
