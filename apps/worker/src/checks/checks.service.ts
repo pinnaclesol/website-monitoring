@@ -1,6 +1,12 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Job, Worker } from 'bullmq';
-import { createWorker, QUEUE_NAMES, SiteCheckJobData } from '@uptime/queue';
+import { Job, Queue, Worker } from 'bullmq';
+import {
+  createAlertDispatchQueue,
+  createWorker,
+  QUEUE_NAMES,
+  SiteCheckJobData,
+  AlertDispatchJobData,
+} from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
 
 /** GET timeout for a single site-check attempt. */
@@ -27,6 +33,7 @@ interface CheckResult {
 export class ChecksService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChecksService.name);
   private worker?: Worker<SiteCheckJobData>;
+  private readonly alertDispatchQueue: Queue<AlertDispatchJobData> = createAlertDispatchQueue();
 
   constructor(private readonly prisma: UptimePrismaService) {}
 
@@ -54,6 +61,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
+    await this.alertDispatchQueue.close();
   }
 
   private async processSiteCheck(job: Job<SiteCheckJobData>): Promise<void> {
@@ -118,25 +126,115 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    // TODO(alert-state-machine): out of scope for this bootstrap session.
-    // This is where the up/down/recovery transition logic belongs — see
-    // .claude/agents/worker-agent.md's "Alert-state machine" invariants:
-    //   - up -> confirmed-down (result.isUp === false here, and this was the
-    //     final attempt): open a new Incident (startedAt = now) *only if*
-    //     one isn't already open for this site, enqueue a `down`
-    //     alert-dispatch job for every active TelegramAccount, the active
-    //     SignalConfig (if any), and every active EmailRecipient; set
-    //     AlertState.isDown = true, lastAlertSentAt = now.
-    //   - still down and
-    //     now - AlertState.lastAlertSentAt >= NotificationSettings.alertIntervalSeconds:
-    //     enqueue a `reminder` alert-dispatch job and bump lastAlertSentAt.
-    //     Never enqueue a reminder before that interval has elapsed.
-    //   - down -> recovered (result.isUp === true here and AlertState.isDown
-    //     was true): close the open Incident (endedAt = now), enqueue a
-    //     `recovery` alert-dispatch job (include downtimeMs) only if
-    //     NotificationSettings.recoveryAlertEnabled, clear AlertState.isDown.
-    //   - Hard invariants: never open a second Incident for a site that
-    //     already has one open; never leave an Incident open after a
-    //     recovered check.
+    await this.runAlertStateMachine(siteId, result.isUp);
+  }
+
+  /**
+   * The down -> repeat-every-N -> recovery state machine. See
+   * .claude/agents/worker-agent.md's "Alert-state machine" section — these
+   * are hard invariants, not guidelines:
+   *   - up -> confirmed-down: open exactly one new Incident, set
+   *     AlertState.isDown = true, lastAlertSentAt = now, enqueue a `down`
+   *     alert-dispatch job.
+   *   - still down, interval elapsed: enqueue a `reminder` alert-dispatch
+   *     job, bump lastAlertSentAt. Never before the interval elapses.
+   *   - down -> recovered: close the open Incident, enqueue a `recovery`
+   *     alert-dispatch job (with downtimeMs) only if recoveryAlertEnabled,
+   *     clear AlertState.isDown.
+   *   - Never open a second Incident for an already-down site; never leave
+   *     an Incident open after a recovered check.
+   *
+   * Known limitation: this isn't wrapped in a DB transaction/lock. A single
+   * site only ever has one repeatable job, so under normal operation there's
+   * no concurrent check for the same site — a manual "check now" racing the
+   * repeatable job for the same site is the one edge case that could
+   * theoretically double-fire, acceptable for now, not addressed here.
+   */
+  private async runAlertStateMachine(siteId: string, isUp: boolean): Promise<void> {
+    const existingState = await this.prisma.alertState.findUnique({ where: { siteId } });
+    const wasDown = existingState?.isDown ?? false;
+    const now = new Date();
+
+    if (!isUp && !wasDown) {
+      // up -> confirmed-down
+      const openIncident = await this.prisma.incident.findFirst({
+        where: { siteId, endedAt: null },
+      });
+      if (!openIncident) {
+        await this.prisma.incident.create({ data: { siteId, startedAt: now } });
+      }
+
+      await this.prisma.alertState.upsert({
+        where: { siteId },
+        update: { isDown: true, lastAlertSentAt: now },
+        create: { siteId, isDown: true, lastAlertSentAt: now },
+      });
+
+      await this.enqueueAlert(siteId, 'down', now);
+      return;
+    }
+
+    if (!isUp && wasDown) {
+      // still down — reminder, gated by NotificationSettings.alertIntervalSeconds
+      const settings = await this.prisma.notificationSettings.findFirst({
+        orderBy: { createdAt: 'asc' },
+      });
+      const intervalMs = (settings?.alertIntervalSeconds ?? 300) * 1000;
+      const lastSent = existingState?.lastAlertSentAt;
+      const dueForReminder = !lastSent || now.getTime() - lastSent.getTime() >= intervalMs;
+
+      if (dueForReminder) {
+        await this.prisma.alertState.update({
+          where: { siteId },
+          data: { lastAlertSentAt: now },
+        });
+        await this.enqueueAlert(siteId, 'reminder', now);
+      }
+      return;
+    }
+
+    if (isUp && wasDown) {
+      // down -> recovered
+      const openIncident = await this.prisma.incident.findFirst({
+        where: { siteId, endedAt: null },
+        orderBy: { startedAt: 'desc' },
+      });
+      if (openIncident) {
+        await this.prisma.incident.update({
+          where: { id: openIncident.id },
+          data: { endedAt: now },
+        });
+      }
+
+      await this.prisma.alertState.update({
+        where: { siteId },
+        data: { isDown: false },
+      });
+
+      const settings = await this.prisma.notificationSettings.findFirst({
+        orderBy: { createdAt: 'asc' },
+      });
+      if (settings?.recoveryAlertEnabled ?? true) {
+        const downtimeMs = openIncident ? now.getTime() - openIncident.startedAt.getTime() : undefined;
+        await this.enqueueAlert(siteId, 'recovery', now, downtimeMs);
+      }
+      return;
+    }
+
+    // isUp && !wasDown — still up, nothing to do.
+  }
+
+  private async enqueueAlert(
+    siteId: string,
+    event: AlertDispatchJobData['event'],
+    occurredAt: Date,
+    downtimeMs?: number
+  ): Promise<void> {
+    await this.alertDispatchQueue.add(`alert-${event}`, {
+      siteId,
+      event,
+      occurredAt: occurredAt.toISOString(),
+      downtimeMs,
+    });
   }
 }

@@ -1,5 +1,19 @@
 @import 'tailwindcss';
 
+/*
+ * Tailwind v4's automatic content detection doesn't cross into libs/ui from
+ * an app that imports this stylesheet — libs/ui is its own npm-workspace
+ * package (has its own package.json), and Tailwind's heuristic scan doesn't
+ * reach into sibling packages even when referenced by a relative path
+ * instead of through node_modules. Without this, every component in
+ * libs/ui/src renders with zero matching CSS (confirmed: a production build
+ * of apps/web contained only the Tailwind classes written directly in
+ * apps/web's own files — none from Button/Badge/Card/Input). This @source
+ * directive is what makes libs/ui self-contained regardless of which app
+ * imports it — an app itself never needs its own @source for this.
+ */
+@source '../**/*.{ts,tsx}';
+
 @font-face {
   font-family: 'Geist';
   src: local('Geist');
@@ -31,6 +45,15 @@
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;
+
+  /*
+   * The Toggle switch's thumb is intentionally white in both themes (same
+   * as the mockup, which never overrides `.toggle-slider::before` under
+   * `[data-theme="dark"]`) — a token instead of a literal hex in
+   * Toggle.tsx so that choice stays declared here, not hardcoded in
+   * component code.
+   */
+  --toggle-thumb: #ffffff;
 }
 
 :root[data-theme='dark'] {
@@ -93,6 +116,8 @@
   --color-blue-bg: var(--blue-bg);
   --color-blue-border: var(--blue-border);
 
+  --color-toggle-thumb: var(--toggle-thumb);
+
   --radius-DEFAULT: var(--radius);
   --radius-sm: var(--radius-sm);
   --radius-lg: var(--radius-lg);
@@ -102,4 +127,18 @@ body {
   background-color: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
+}
+
+/* Toast slide-in-from-right, used by components/Toast.tsx via an arbitrary
+   `animate-[toast-in_0.2s_ease-out]` utility (no tailwindcss-animate plugin
+   installed, so the keyframes live here instead). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
