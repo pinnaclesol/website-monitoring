@@ -1,0 +1,13 @@
+{
+  "name": "worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "dev": "nest start --watch",
+    "serve": "nest start --watch",
+    "start:prod": "node dist/main",
+    "lint": "eslint src --fix",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json"
+  }
+}

@@ -1,0 +1,105 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Geist';
+  src: local('Geist');
+}
+
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f9f9f9;
+  --bg-muted: #f4f4f5;
+  --border: #e4e4e7;
+  --border-strong: #d4d4d8;
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-subtle: #a1a1aa;
+  --accent: #18181b;
+  --accent-fg: #fafafa;
+  --green: #16a34a;
+  --green-bg: #f0fdf4;
+  --green-border: #bbf7d0;
+  --red: #dc2626;
+  --red-bg: #fef2f2;
+  --red-border: #fecaca;
+  --yellow: #ca8a04;
+  --yellow-bg: #fefce8;
+  --yellow-border: #fef08a;
+  --blue: #2563eb;
+  --blue-bg: #eff6ff;
+  --blue-border: #bfdbfe;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+}
+
+:root[data-theme='dark'] {
+  --bg: #09090b;
+  --bg-secondary: #111113;
+  --bg-muted: #18181b;
+  --border: #27272a;
+  --border-strong: #3f3f46;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-subtle: #71717a;
+  --accent: #fafafa;
+  --accent-fg: #09090b;
+  --green: #22c55e;
+  --green-bg: #052e16;
+  --green-border: #14532d;
+  --red: #f87171;
+  --red-bg: #450a0a;
+  --red-border: #7f1d1d;
+  --yellow: #fbbf24;
+  --yellow-bg: #422006;
+  --yellow-border: #713f12;
+  --blue: #60a5fa;
+  --blue-bg: #172554;
+  --blue-border: #1e3a5f;
+}
+
+/*
+ * Tailwind v4 is CSS-first: @theme both declares a CSS custom property AND
+ * registers a utility (bg-bg, text-text-muted, border-border-strong, ...).
+ * Each entry aliases the light/dark-switchable raw token above via var(),
+ * so the generated utility classes stay correct when [data-theme="dark"]
+ * overrides the raw --bg/--text/... values on :root.
+ */
+@theme {
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-muted: var(--bg-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+
+  --color-green: var(--green);
+  --color-green-bg: var(--green-bg);
+  --color-green-border: var(--green-border);
+  --color-red: var(--red);
+  --color-red-bg: var(--red-bg);
+  --color-red-border: var(--red-border);
+  --color-yellow: var(--yellow);
+  --color-yellow-bg: var(--yellow-bg);
+  --color-yellow-border: var(--yellow-border);
+  --color-blue: var(--blue);
+  --color-blue-bg: var(--blue-bg);
+  --color-blue-border: var(--blue-border);
+
+  --radius-DEFAULT: var(--radius);
+  --radius-sm: var(--radius-sm);
+  --radius-lg: var(--radius-lg);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
