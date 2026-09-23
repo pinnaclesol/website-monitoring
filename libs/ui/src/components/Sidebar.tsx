@@ -58,7 +58,7 @@ function SidebarHeader({
       <div className="flex items-center gap-2.5 text-[14.5px] font-semibold text-text">
         <div
           aria-hidden="true"
-          className="flex size-7 shrink-0 items-center justify-center rounded-sm bg-accent text-accent-fg"
+          className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent text-accent-fg shadow-sm"
         >
           {icon ?? <DefaultLogoIcon />}
         </div>
@@ -70,7 +70,7 @@ function SidebarHeader({
 
 const SidebarNav = React.forwardRef<HTMLElement, React.HTMLAttributes<HTMLElement>>(
   ({ className, ...props }, ref) => (
-    <nav ref={ref} className={cn('flex-1 px-2 pt-2', className)} {...props} />
+    <nav ref={ref} className={cn('flex-1 space-y-0.5 px-2 pt-2', className)} {...props} />
   )
 );
 SidebarNav.displayName = 'SidebarNav';
@@ -97,10 +97,14 @@ const SidebarNavItem = React.forwardRef<HTMLButtonElement, SidebarNavItemProps>(
         type={asChild ? undefined : 'button'}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex w-full items-center gap-2 rounded-sm py-1.5 pl-[22px] pr-2 text-left text-[13px] text-text-muted transition-colors',
+          'relative flex w-full items-center gap-2 rounded-sm py-1.5 pl-[22px] pr-2 text-left text-[13px] text-text-muted transition-colors',
           'hover:bg-bg-muted hover:text-text',
           '[&_svg]:size-4 [&_svg]:shrink-0',
-          active && 'bg-bg-muted font-medium text-text',
+          // Left accent bar (flush with the sidebar's own edge, just outside
+          // SidebarNav's px-2) instead of relying on background tint alone
+          // to say "you are here" — a stronger, more deliberate active state.
+          active &&
+            "bg-accent/[0.06] font-medium text-text before:absolute before:-left-2 before:inset-y-1.5 before:w-[3px] before:rounded-full before:bg-accent before:content-['']",
           className
         )}
         {...props}

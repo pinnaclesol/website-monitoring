@@ -16,7 +16,8 @@ const Topbar = React.forwardRef<HTMLElement, TopbarProps>(
     <header
       ref={ref}
       className={cn(
-        'sticky top-0 z-[5] flex h-14 items-center justify-between border-b border-border bg-bg px-6',
+        'sticky top-0 z-[5] flex h-14 items-center justify-between border-b border-border px-6',
+        'bg-bg/85 backdrop-blur-sm supports-[backdrop-filter]:bg-bg/75',
         className
       )}
       {...props}

@@ -33,8 +33,14 @@ export type { ModalProps } from './components/ui/Modal';
 export { EmptyState } from './components/ui/EmptyState';
 export type { EmptyStateProps } from './components/ui/EmptyState';
 
-export { Select } from './components/ui/Select';
-export type { SelectProps } from './components/ui/Select';
+export {
+  Select,
+  SelectGroup,
+  SelectValue,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+} from './components/ui/Select';
 
 export {
   Dropdown,
@@ -65,7 +71,7 @@ export type { ToastInput, ToastContextValue } from './components/ToastProvider';
 export { useToast } from './components/use-toast';
 
 export { StatCard } from './components/StatCard';
-export type { StatCardProps } from './components/StatCard';
+export type { StatCardProps, StatCardAccent } from './components/StatCard';
 
 export { IncidentBanner } from './components/IncidentBanner';
 export type { IncidentBannerProps } from './components/IncidentBanner';

@@ -1,10 +1,11 @@
 import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
-export class CreateSiteDto {
+export class UpdateMonitorDto {
+  @IsOptional()
   @IsString()
   @IsNotEmpty()
   @MaxLength(2048)
-  domain!: string;
+  domain?: string;
 
   @IsOptional()
   @IsString()

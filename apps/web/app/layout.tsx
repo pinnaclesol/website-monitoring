@@ -2,11 +2,22 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { Providers } from './providers';
+import { getBrandingSettings } from '../lib/branding-settings';
 
-export const metadata: Metadata = {
-  title: 'Uptime Monitor',
-  description: 'Self-hosted uptime monitoring dashboard.',
-};
+/**
+ * Dynamic (not a static `export const metadata`) so the page title and
+ * favicon reflect the admin's saved branding (Settings > General) — this
+ * runs on every request, before any session exists, so it applies on
+ * /login too, not just inside the dashboard.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const { siteName, faviconUrl } = await getBrandingSettings();
+  return {
+    title: siteName,
+    description: 'Self-hosted uptime monitoring dashboard.',
+    icons: faviconUrl ? { icon: faviconUrl } : undefined,
+  };
+}
 
 /**
  * Applies the saved theme to <html> before paint, so there's no flash of the

@@ -4,7 +4,7 @@ import { IsBoolean, IsOptional, IsString } from 'class-validator';
 export class ListIncidentsQueryDto {
   @IsOptional()
   @IsString()
-  siteId?: string;
+  monitorId?: string;
 
   /** ?open=true — only currently-open incidents (endedAt = null). */
   @IsOptional()

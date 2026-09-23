@@ -10,7 +10,7 @@ You are a frontend specialist for the `apps/web` dashboard in the uptime-monitor
 
 **Scope**: `apps/web` only. Shared primitives live in `libs/ui` — if a component belongs to more than one page, it goes there, not in `apps/web`.
 
-**Views**: Dashboard (monitor grid/table + stats), Incidents (downtime log), Notifications (Telegram/Signal/email settings). All under `(dashboard)/`, auth-gated — redirect to `/login` if no session, matching `billing-manager`'s pattern.
+**Views**: Dashboard (monitor grid/table + stats), Incidents (downtime log), Settings (branding + Telegram/Signal/email + alert behavior — nav label "Settings", route still `/notifications`). All under `(dashboard)/`, auth-gated — redirect to `/login` if no session, matching `billing-manager`'s pattern.
 
 **Hard rule**: `apps/web` never makes an HTTP request to a monitored site's URL, and never talks to Postgres/Redis directly. Every data need goes through a Next.js API route under `app/api/*` that proxies to `apps/api` with the shared `INTERNAL_API_KEY` header. `apps/api` is the only thing `apps/web` talks to.
 

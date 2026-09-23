@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { Topbar, Breadcrumb, Card, CardHeader, CardTitle, CardDescription, Badge, EmptyState } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
 import { stripProtocol } from '../../../lib/format';
-import type { IncidentWithSite } from '../../../lib/types';
+import type { IncidentWithMonitor } from '../../../lib/types';
+import { useSiteName } from '../site-name-context';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -39,12 +40,13 @@ function formatDurationBetween(startIso: string, endIso: string | null): string 
 }
 
 export default function IncidentsPage() {
-  const [incidents, setIncidents] = useState<IncidentWithSite[] | null>(null);
+  const siteName = useSiteName();
+  const [incidents, setIncidents] = useState<IncidentWithMonitor[] | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await apiFetch<IncidentWithSite[]>('incidents');
+        const data = await apiFetch<IncidentWithMonitor[]>('incidents');
         setIncidents(data);
       } catch {
         // Poll silently retries.
@@ -58,7 +60,7 @@ export default function IncidentsPage() {
   return (
     <>
       <Topbar>
-        <Breadcrumb section="Uptime Monitor" page="Incidents" />
+        <Breadcrumb section={siteName} page="Incidents" />
       </Topbar>
       <div className="flex-1 p-6">
         <Card>
@@ -88,11 +90,11 @@ export default function IncidentsPage() {
                     <tr key={incident.id} className="border-b border-border last:border-b-0 hover:bg-bg-secondary">
                       <td className="px-5 py-2.5">
                         <span className="text-[13.5px] font-medium text-text">
-                          {incident.site.label || stripProtocol(incident.site.domain)}
+                          {incident.monitor.label || stripProtocol(incident.monitor.domain)}
                         </span>
                       </td>
                       <td className="px-5 py-2.5">
-                        <span className="font-mono text-xs text-text-muted">{stripProtocol(incident.site.domain)}</span>
+                        <span className="font-mono text-xs text-text-muted">{stripProtocol(incident.monitor.domain)}</span>
                       </td>
                       <td className="px-5 py-2.5">
                         {incident.endedAt ? (

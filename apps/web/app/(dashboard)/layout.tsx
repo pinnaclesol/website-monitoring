@@ -2,19 +2,26 @@ import type { ReactNode } from 'react';
 import { redirect } from 'next/navigation';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../lib/auth';
+import { getBrandingSettings } from '../../lib/branding-settings';
 import { DashboardNav } from './dashboard-nav';
+import { SiteNameProvider } from './site-name-context';
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const session = await getServerSession(authOptions);
+  const [session, { siteName, faviconUrl }] = await Promise.all([
+    getServerSession(authOptions),
+    getBrandingSettings(),
+  ]);
 
   if (!session) {
     redirect('/login');
   }
 
   return (
-    <div className="min-h-screen bg-bg">
-      <DashboardNav username={session.user.username} />
-      <div className="ml-[248px] flex min-h-screen flex-col">{children}</div>
-    </div>
+    <SiteNameProvider siteName={siteName}>
+      <div className="min-h-screen bg-bg">
+        <DashboardNav username={session.user.username} siteName={siteName} iconUrl={faviconUrl} />
+        <div className="ml-[248px] flex min-h-screen flex-col">{children}</div>
+      </div>
+    </SiteNameProvider>
   );
 }

@@ -7,7 +7,12 @@
 //
 // Plain PascalCase model/table names: this Postgres instance is fully
 // dedicated to this app, so there's no need for a shared-DB disambiguation
-// prefix the way billing-manager uses `Rebil_`.
+// prefix the way billing-manager uses `Rebil_`. Names are deliberately
+// self-descriptive (`Monitor`, `MonitorCheck`, `MonitorAlertState`,
+// `AlertSettings`, `BrandingSettings`) rather than generic (`Site`, `Check`,
+// `AlertState`, `NotificationSettings`, `AppSettings`) — a dev browsing the
+// table list or the generated Prisma Client should be able to tell what
+// each one is for without cross-referencing this file.
 
 generator client {
   provider = "prisma-client-js"
@@ -32,9 +37,12 @@ model User {
   @@map("User")
 }
 
-/// A monitored URL/domain. Soft-deleted via `deletedAt` so check/incident
-/// history survives removal from the dashboard.
-model Site {
+/// A monitored URL/domain — the core entity of the app. Soft-deleted via
+/// `deletedAt` so check/incident history survives removal from the
+/// dashboard. Named `Monitor` (not `Site`) to match the app's own UI
+/// language ("Add monitor", "Monitors" table) instead of an ambiguous word
+/// that could mean anything.
+model Monitor {
   id        String    @id @default(cuid())
   domain    String
   label     String?
@@ -43,19 +51,19 @@ model Site {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  checks    Check[]
-  incidents Incident[]
-  alertState AlertState?
+  checks     MonitorCheck[]
+  incidents  Incident[]
+  alertState MonitorAlertState?
 
-  @@map("Site")
+  @@map("Monitor")
 }
 
-/// One row per check performed by apps/worker. Capped at the newest 100 rows
-/// per site by the daily `cleanup` BullMQ job — this is an app-level
-/// housekeeping policy, not a DB constraint.
-model Check {
+/// One health-check result performed by apps/worker for a Monitor. Capped
+/// at the newest 100 rows per monitor by the daily `cleanup` BullMQ job —
+/// this is an app-level housekeeping policy, not a DB constraint.
+model MonitorCheck {
   id             String   @id @default(cuid())
-  siteId         String
+  monitorId      String
   timestamp      DateTime @default(now())
   isUp           Boolean
   statusCode     Int?
@@ -64,49 +72,49 @@ model Check {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
 
-  // Required for efficient "latest checks for a site" queries.
-  @@index([siteId, timestamp(sort: Desc)])
-  @@map("Check")
+  // Required for efficient "latest checks for a monitor" queries.
+  @@index([monitorId, timestamp(sort: Desc)])
+  @@map("MonitorCheck")
 }
 
-/// Downtime log. `endedAt = null` means the incident is currently open.
-/// Invariant (app-level, not DB-enforced): at most one open row
-/// (`endedAt = null`) per site at any time — opened on down-confirmed,
-/// closed on recovery. Not enforced with a partial unique index; the
-/// down/recovery state machine in apps/worker is responsible for upholding
-/// this.
+/// Downtime log for a Monitor. `endedAt = null` means the incident is
+/// currently open. Invariant (app-level, not DB-enforced): at most one open
+/// row (`endedAt = null`) per monitor at any time — opened on
+/// down-confirmed, closed on recovery. Not enforced with a partial unique
+/// index; the down/recovery state machine in apps/worker is responsible for
+/// upholding this.
 model Incident {
   id        String    @id @default(cuid())
-  siteId    String
+  monitorId String
   startedAt DateTime  @default(now())
   endedAt   DateTime?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
 
-  @@index([siteId, startedAt(sort: Desc)])
+  @@index([monitorId, startedAt(sort: Desc)])
   @@map("Incident")
 }
 
-/// One row per site, drives the down -> repeat-every-N -> recovery alert
+/// One row per Monitor, drives the down -> repeat-every-N -> recovery alert
 /// dedup state machine. Mutated in place by apps/worker; no `updatedAt`
 /// since `lastAlertSentAt` already tracks the last meaningful state change.
-model AlertState {
+model MonitorAlertState {
   id              String    @id @default(cuid())
-  siteId          String    @unique
+  monitorId       String    @unique
   isDown          Boolean   @default(false)
   lastAlertSentAt DateTime?
 
-  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
 
-  @@map("AlertState")
+  @@map("MonitorAlertState")
 }
 
 /// A Telegram bot/chat destination. Multiple rows = multiple destinations,
-/// managed from the Notifications settings view.
+/// managed from the Settings view.
 model TelegramAccount {
   id        String   @id @default(cuid())
   label     String
@@ -123,12 +131,12 @@ model TelegramAccount {
 /// requires a running signal-cli-rest-api sidecar with a registered phone
 /// number, so this models an infra-bound integration, not just a credential.
 model SignalConfig {
-  id             String   @id @default(cuid())
-  senderNumber   String
+  id              String   @id @default(cuid())
+  senderNumber    String
   recipientNumber String
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@map("SignalConfig")
 }
@@ -145,16 +153,35 @@ model EmailRecipient {
   @@map("EmailRecipient")
 }
 
-/// Singleton row: general alert behavior settings shared by all
-/// notification channels. Modeled as a normal table — the app is
+/// Singleton row: alert-repeat/recovery behavior shared by all notification
+/// channels (Telegram/Signal/Email). Modeled as a normal table — the app is
 /// responsible for ever only upserting a single row; no DB-level singleton
-/// enforcement (e.g. a fixed/hardcoded id) is required.
-model NotificationSettings {
-  id                    String   @id @default(cuid())
-  alertIntervalSeconds  Int      @default(300)
-  recoveryAlertEnabled  Boolean  @default(true)
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+/// enforcement (e.g. a fixed/hardcoded id) is required. Named `AlertSettings`
+/// (not the more generic `NotificationSettings`) since that's precisely what
+/// it holds.
+model AlertSettings {
+  id                   String   @id @default(cuid())
+  alertIntervalSeconds Int      @default(300)
+  recoveryAlertEnabled Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  @@map("NotificationSettings")
+  @@map("AlertSettings")
+}
+
+/// Singleton row: dashboard branding (site name, favicon/logo). Same
+/// app-enforced-singleton pattern as AlertSettings — no DB-level singleton
+/// constraint, the app only ever upserts one row. Named `BrandingSettings`
+/// (not the more generic `AppSettings`) to say exactly what it configures,
+/// and matches its own API route (`/settings/branding`).
+model BrandingSettings {
+  id       String @id @default(cuid())
+  siteName String @default("Uptime Monitor")
+  /// URL to an image used as both the sidebar logo mark and the browser
+  /// favicon — one asset for both rather than separate upload plumbing.
+  faviconUrl String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("BrandingSettings")
 }

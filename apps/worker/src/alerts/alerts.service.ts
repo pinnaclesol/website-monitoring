@@ -4,8 +4,8 @@ import { createWorker, QUEUE_NAMES, AlertDispatchJobData } from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
 
 /**
- * Separate, smaller concurrency than `site-checks` on purpose: a
- * slow/rate-limited Telegram or SMTP call must never delay the next site
+ * Separate, smaller concurrency than `monitor-checks` on purpose: a
+ * slow/rate-limited Telegram or SMTP call must never delay the next monitor
  * check cycle. Kept as a named constant so it's clearly a deliberate choice.
  */
 const ALERT_DISPATCH_CONCURRENCY = 10;
@@ -47,7 +47,7 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async dispatchAlert(job: Job<AlertDispatchJobData>): Promise<void> {
-    const { siteId, event, occurredAt, downtimeMs } = job.data;
+    const { monitorId, event, occurredAt, downtimeMs } = job.data;
 
     // Always read channel config from the DB at dispatch time (never
     // cache/hardcode) — even for this stub, so the extension point is
@@ -60,7 +60,7 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     this.logger.log(
-      `[stub] would dispatch "${event}" alert for site=${siteId} occurredAt=${occurredAt}` +
+      `[stub] would dispatch "${event}" alert for monitor=${monitorId} occurredAt=${occurredAt}` +
         `${downtimeMs !== undefined ? ` downtimeMs=${downtimeMs}` : ''} -> ` +
         `telegram=${telegramCount} signal=${activeSignal ? 1 : 0} email=${emailCount}`
     );

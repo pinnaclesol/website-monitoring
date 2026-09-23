@@ -13,7 +13,7 @@ Review the current uncommitted changes in the uptime-monitor monorepo.
 2. Read each changed file in full.
 3. Apply the code-reviewer agent's checklist:
    - Module boundaries (`apps/web` → `@uptime/ui`/`@uptime/auth` only; `apps/api` = BullMQ producer only; `apps/worker` = sole caller of monitored-site URLs)
-   - Alert-state correctness (single open `Incident` per down site, dedup via `AlertState.lastAlertSentAt`, no premature reminders, retry via BullMQ job options not hand-rolled timers)
+   - Alert-state correctness (single open `Incident` per down monitor, dedup via `MonitorAlertState.lastAlertSentAt`, no premature reminders, retry via BullMQ job options not hand-rolled timers)
    - Security (no logged/returned secrets, internal-API-key guard present, bcrypt-only password handling)
    - Database conventions (singleton `UptimePrismaService`, no manual migration edits)
    - Design-token compliance (no ad-hoc hex colors, dark mode works)

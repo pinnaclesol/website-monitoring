@@ -8,7 +8,7 @@ export class IncidentsController {
 
   @Get()
   findAll(@Query() query: ListIncidentsQueryDto) {
-    return this.incidentsService.findAll(query.siteId, query.open);
+    return this.incidentsService.findAll(query.monitorId, query.open);
   }
 
   @Get(':id')
@@ -17,12 +17,12 @@ export class IncidentsController {
   }
 }
 
-@Controller('sites/:siteId/incidents')
-export class SiteIncidentsController {
+@Controller('monitors/:monitorId/incidents')
+export class MonitorIncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
   @Get()
-  findForSite(@Param('siteId') siteId: string) {
-    return this.incidentsService.findForSite(siteId);
+  findForMonitor(@Param('monitorId') monitorId: string) {
+    return this.incidentsService.findForMonitor(monitorId);
   }
 }

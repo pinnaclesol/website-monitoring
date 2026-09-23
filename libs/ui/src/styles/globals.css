@@ -36,6 +36,11 @@
   --red: #dc2626;
   --red-bg: #fef2f2;
   --red-border: #fecaca;
+  /* High-contrast text for a SOLID red fill (e.g. Button danger's hover
+     state) — same paired-token idea as --accent/--accent-fg. Not just
+     "white": dark mode's --red is a light pastel red, where white text
+     would have poor contrast, so it flips to a near-black red instead. */
+  --red-fg: #fef2f2;
   --yellow: #ca8a04;
   --yellow-bg: #fefce8;
   --yellow-border: #fef08a;
@@ -73,6 +78,7 @@
   --red: #f87171;
   --red-bg: #450a0a;
   --red-border: #7f1d1d;
+  --red-fg: #450a0a;
   --yellow: #fbbf24;
   --yellow-bg: #422006;
   --yellow-border: #713f12;
@@ -109,6 +115,7 @@
   --color-red: var(--red);
   --color-red-bg: var(--red-bg);
   --color-red-border: var(--red-border);
+  --color-red-fg: var(--red-fg);
   --color-yellow: var(--yellow);
   --color-yellow-bg: var(--yellow-bg);
   --color-yellow-border: var(--yellow-border);
@@ -140,5 +147,27 @@ body {
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+/* Select dropdown panel open/close, used by ui/Select.tsx. */
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes select-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
   }
 }

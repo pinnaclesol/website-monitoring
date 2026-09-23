@@ -15,7 +15,7 @@ import {
 } from '@uptime/ui';
 import { apiFetch } from '../../lib/api-client';
 import { timeAgo, responseTimeClass, uptimeColorClass, stripProtocol } from '../../lib/format';
-import { monitorStatus, type SiteWithStatus } from '../../lib/types';
+import { monitorStatus, type MonitorWithStatus } from '../../lib/types';
 
 const HISTORY_SIZE = 30;
 
@@ -51,26 +51,26 @@ function DotsIcon() {
 }
 
 export function MonitorRow({
-  site,
+  monitor,
   onChanged,
   onDeleteRequested,
 }: {
-  site: SiteWithStatus;
+  monitor: MonitorWithStatus;
   onChanged: () => void;
-  onDeleteRequested: (site: SiteWithStatus) => void;
+  onDeleteRequested: (monitor: MonitorWithStatus) => void;
 }) {
   const toast = useToast();
-  const status = monitorStatus(site);
-  const urlShort = stripProtocol(site.domain);
-  const rt = site.latestCheck?.responseTimeMs ?? null;
+  const status = monitorStatus(monitor);
+  const urlShort = stripProtocol(monitor.domain);
+  const rt = monitor.latestCheck?.responseTimeMs ?? null;
 
   async function togglePause(nextEnabled: boolean) {
     try {
-      await apiFetch(`sites/${site.id}/${nextEnabled ? 'resume' : 'pause'}`, { method: 'POST' });
+      await apiFetch(`monitors/${monitor.id}/${nextEnabled ? 'resume' : 'pause'}`, { method: 'POST' });
       toast({
         type: 'info',
         title: nextEnabled ? 'Monitoring resumed' : 'Monitoring paused',
-        message: site.label || urlShort,
+        message: monitor.label || urlShort,
       });
       onChanged();
     } catch (err) {
@@ -80,8 +80,8 @@ export function MonitorRow({
 
   async function checkNow() {
     try {
-      await apiFetch(`sites/${site.id}/check-now`, { method: 'POST' });
-      toast({ type: 'info', title: 'Check queued', message: `${site.label || urlShort} will be checked shortly` });
+      await apiFetch(`monitors/${monitor.id}/check-now`, { method: 'POST' });
+      toast({ type: 'info', title: 'Check queued', message: `${monitor.label || urlShort} will be checked shortly` });
       onChanged();
     } catch (err) {
       toast({ type: 'error', title: 'Could not queue check', message: err instanceof Error ? err.message : undefined });
@@ -90,21 +90,21 @@ export function MonitorRow({
 
   function copyUrl() {
     navigator.clipboard
-      .writeText(`https://${site.domain}`)
-      .then(() => toast({ type: 'success', title: 'Copied', message: `https://${site.domain}` }));
+      .writeText(`https://${monitor.domain}`)
+      .then(() => toast({ type: 'success', title: 'Copied', message: `https://${monitor.domain}` }));
   }
 
   return (
     <tr className="border-b border-border last:border-b-0 hover:bg-bg-secondary">
       <td className="px-5 py-2.5">
         <Toggle
-          checked={!site.isPaused}
+          checked={!monitor.isPaused}
           onCheckedChange={togglePause}
-          aria-label={site.isPaused ? 'Resume monitoring' : 'Pause monitoring'}
+          aria-label={monitor.isPaused ? 'Resume monitoring' : 'Pause monitoring'}
         />
       </td>
       <td className="px-5 py-2.5">
-        <div className="text-[13.5px] font-medium text-text">{site.label || urlShort}</div>
+        <div className="text-[13.5px] font-medium text-text">{monitor.label || urlShort}</div>
         <div className="font-mono text-xs text-text-muted">{urlShort}</div>
       </td>
       <td className="px-5 py-2.5">
@@ -118,14 +118,14 @@ export function MonitorRow({
         )}
       </td>
       <td className="px-5 py-2.5">
-        <span className="text-xs text-text-muted">{timeAgo(site.latestCheck?.timestamp)}</span>
+        <span className="text-xs text-text-muted">{timeAgo(monitor.latestCheck?.timestamp)}</span>
       </td>
       <td className="px-5 py-2.5">
-        <HistoryBars history={padHistory(site.history)} />
+        <HistoryBars history={padHistory(monitor.history)} />
       </td>
       <td className="px-5 py-2.5">
-        <span className={`font-mono text-[12.5px] font-medium ${uptimeColorClass(site.uptime24h)}`}>
-          {site.uptime24h === null ? '—' : `${site.uptime24h.toFixed(1)}%`}
+        <span className={`font-mono text-[12.5px] font-medium ${uptimeColorClass(monitor.uptime24h)}`}>
+          {monitor.uptime24h === null ? '—' : `${monitor.uptime24h.toFixed(1)}%`}
         </span>
       </td>
       <td className="px-5 py-2.5">
@@ -141,11 +141,11 @@ export function MonitorRow({
             </DropdownTrigger>
             <DropdownContent>
               <DropdownItem onClick={copyUrl}>Copy URL</DropdownItem>
-              <DropdownItem onClick={() => window.open(`https://${site.domain}`, '_blank', 'noopener')}>
+              <DropdownItem onClick={() => window.open(`https://${monitor.domain}`, '_blank', 'noopener')}>
                 Open site
               </DropdownItem>
               <DropdownSeparator />
-              <DropdownItem danger onClick={() => onDeleteRequested(site)}>
+              <DropdownItem danger onClick={() => onDeleteRequested(monitor)}>
                 Remove
               </DropdownItem>
             </DropdownContent>

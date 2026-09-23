@@ -1,5 +1,5 @@
 export const QUEUE_NAMES = {
-  SITE_CHECKS: 'site-checks',
+  MONITOR_CHECKS: 'monitor-checks',
   ALERT_DISPATCH: 'alert-dispatch',
   CLEANUP: 'cleanup',
 } as const;

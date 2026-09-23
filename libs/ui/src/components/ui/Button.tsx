@@ -11,16 +11,16 @@ import { cn } from '../../lib/cn';
  * light (default) and `[data-theme="dark"]`.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-colors ' +
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-all active:scale-[0.98] ' +
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg ' +
-    'disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+    'disabled:pointer-events-none disabled:opacity-50 disabled:active:scale-100 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
-        primary: 'border border-transparent bg-accent text-accent-fg hover:opacity-90',
-        outline: 'border border-border bg-bg text-text hover:bg-bg-muted',
+        primary: 'border border-transparent bg-accent text-accent-fg shadow-sm hover:opacity-90 hover:shadow-md',
+        outline: 'border border-border bg-bg text-text shadow-sm hover:border-border-strong hover:bg-bg-muted',
         ghost: 'border border-transparent bg-transparent text-text hover:bg-bg-muted',
-        danger: 'border border-red-border bg-red-bg text-red hover:bg-red-border',
+        danger: 'border border-red-border bg-red-bg text-red hover:bg-red hover:text-red-fg',
       },
       size: {
         default: 'h-9 rounded px-4 text-sm',

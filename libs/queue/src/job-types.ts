@@ -1,6 +1,6 @@
-/** Payload for a `site-checks` job — one repeatable job per active Site, plus one-off "check now" jobs. */
-export interface SiteCheckJobData {
-  siteId: string;
+/** Payload for a `monitor-checks` job — one repeatable job per active Monitor, plus one-off "check now" jobs. */
+export interface MonitorCheckJobData {
+  monitorId: string;
   domain: string;
 }
 
@@ -8,7 +8,7 @@ export type AlertEvent = 'down' | 'reminder' | 'recovery';
 
 /** Payload for an `alert-dispatch` job — one job per alert event, enqueued by apps/worker. */
 export interface AlertDispatchJobData {
-  siteId: string;
+  monitorId: string;
   event: AlertEvent;
   /** ISO timestamp the event was detected/triggered at. */
   occurredAt: string;
@@ -16,5 +16,5 @@ export interface AlertDispatchJobData {
   downtimeMs?: number;
 }
 
-/** Payload for the daily `cleanup` job — trims each Site's Check rows to the newest 100. No fields needed. */
+/** Payload for the daily `cleanup` job — trims each Monitor's MonitorCheck rows to the newest 100. No fields needed. */
 export type CleanupJobData = Record<string, never>;

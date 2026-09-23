@@ -29,11 +29,20 @@ function IncidentsIcon() {
     </svg>
   );
 }
-function NotificationsIcon() {
+function SettingsIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 01-3.46 0" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+    </svg>
+  );
+}
+function SignOutIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <polyline points="16 17 21 12 16 7" />
+      <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
   );
 }
@@ -41,15 +50,29 @@ function NotificationsIcon() {
 const NAV_ITEMS = [
   { href: '/', label: 'Dashboard', icon: <DashboardIcon /> },
   { href: '/incidents', label: 'Incidents', icon: <IncidentsIcon /> },
-  { href: '/notifications', label: 'Notifications', icon: <NotificationsIcon /> },
+  { href: '/notifications', label: 'Settings', icon: <SettingsIcon /> },
 ];
 
-export function DashboardNav({ username }: { username: string }) {
+export function DashboardNav({
+  username,
+  siteName,
+  iconUrl,
+}: {
+  username: string;
+  siteName?: string;
+  iconUrl?: string | null;
+}) {
   const pathname = usePathname();
+  const initial = username.charAt(0).toUpperCase();
 
   return (
     <Sidebar>
-      <SidebarHeader />
+      <SidebarHeader
+        productName={siteName}
+        // Plain <img>, not next/image: an external admin-supplied URL, and
+        // next/image requires allow-listing remote hosts up front.
+        icon={iconUrl ? <img src={iconUrl} alt="" /> : undefined}
+      />
       <SidebarNav>
         {NAV_ITEMS.map((item) => (
           <SidebarNavItem key={item.href} asChild active={pathname === item.href}>
@@ -62,12 +85,25 @@ export function DashboardNav({ username }: { username: string }) {
       </SidebarNav>
       <SidebarFooter className="flex flex-col gap-1">
         <ThemeToggle />
-        <div className="flex items-center justify-between gap-2 px-2 pt-1.5">
-          <span className="truncate text-xs text-text-muted" title={username}>
+        <div className="mt-1 flex items-center gap-2 rounded-sm px-2 py-1.5">
+          <span
+            aria-hidden="true"
+            className="flex size-6 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-semibold text-accent-fg"
+          >
+            {initial}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-xs font-medium text-text" title={username}>
             {username}
           </span>
-          <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: '/login' })}>
-            Sign out
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p-1.5 text-text-muted hover:text-text"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => signOut({ callbackUrl: '/login' })}
+          >
+            <SignOutIcon />
           </Button>
         </div>
       </SidebarFooter>

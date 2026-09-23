@@ -5,21 +5,25 @@ import { SignalConfigController } from './signal-config/signal-config.controller
 import { SignalConfigService } from './signal-config/signal-config.service';
 import { EmailRecipientsController } from './email-recipients/email-recipients.controller';
 import { EmailRecipientsService } from './email-recipients/email-recipients.service';
-import { NotificationSettingsController } from './notification-settings/notification-settings.controller';
-import { NotificationSettingsService } from './notification-settings/notification-settings.service';
+import { AlertSettingsController } from './alert-settings/alert-settings.controller';
+import { AlertSettingsService } from './alert-settings/alert-settings.service';
+import { BrandingSettingsController } from './branding-settings/branding-settings.controller';
+import { BrandingSettingsService } from './branding-settings/branding-settings.service';
 
 @Module({
   controllers: [
     TelegramAccountsController,
     SignalConfigController,
     EmailRecipientsController,
-    NotificationSettingsController,
+    AlertSettingsController,
+    BrandingSettingsController,
   ],
   providers: [
     TelegramAccountsService,
     SignalConfigService,
     EmailRecipientsService,
-    NotificationSettingsService,
+    AlertSettingsService,
+    BrandingSettingsService,
   ],
 })
 export class SettingsModule {}

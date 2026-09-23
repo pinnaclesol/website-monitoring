@@ -39,5 +39,6 @@
         "startTargetName": "start"
       }
     }
-  ]
+  ],
+  "analytics": false
 }

@@ -1,6 +1,6 @@
 import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
 
-export class UpdateNotificationSettingsDto {
+export class UpdateAlertSettingsDto {
   @IsOptional()
   @IsInt()
   @Min(30)

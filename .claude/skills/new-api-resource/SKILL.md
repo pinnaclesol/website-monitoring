@@ -7,7 +7,7 @@ user-invocable: true
 
 Scaffold a new NestJS resource (module + controller + service + DTO) in **`apps/api/src/`**, plus a matching proxy route in **`apps/web/app/api/`**.
 
-Argument: `$ARGUMENTS` — resource name in kebab-case (e.g. `sites`, `incidents`, `telegram-accounts`)
+Argument: `$ARGUMENTS` — resource name in kebab-case (e.g. `monitors`, `incidents`, `telegram-accounts`)
 
 ## Architecture reminder
 

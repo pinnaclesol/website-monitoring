@@ -1,5 +1,5 @@
-/** Mirrors apps/api's enriched GET /api/sites response shape (sites.service.ts's `enrich()`). */
-export interface SiteWithStatus {
+/** Mirrors apps/api's enriched GET /api/monitors response shape (monitors.service.ts's `enrich()`). */
+export interface MonitorWithStatus {
   id: string;
   domain: string;
   label: string | null;
@@ -21,21 +21,21 @@ export interface SiteWithStatus {
 
 export type MonitorStatus = 'up' | 'down' | 'paused' | 'checking';
 
-export function monitorStatus(site: SiteWithStatus): MonitorStatus {
-  if (site.isPaused) return 'paused';
-  if (!site.latestCheck) return 'checking';
-  return site.latestCheck.isUp ? 'up' : 'down';
+export function monitorStatus(monitor: MonitorWithStatus): MonitorStatus {
+  if (monitor.isPaused) return 'paused';
+  if (!monitor.latestCheck) return 'checking';
+  return monitor.latestCheck.isUp ? 'up' : 'down';
 }
 
-export interface IncidentWithSite {
+export interface IncidentWithMonitor {
   id: string;
-  siteId: string;
+  monitorId: string;
   startedAt: string;
   endedAt: string | null;
-  site: { id: string; domain: string; label: string | null };
+  monitor: { id: string; domain: string; label: string | null };
 }
 
-export interface NotificationSettings {
+export interface AlertSettings {
   id: string;
   alertIntervalSeconds: number;
   recoveryAlertEnabled: boolean;

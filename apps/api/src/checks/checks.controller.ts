@@ -2,13 +2,13 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { ChecksService } from './checks.service';
 import { ListChecksQueryDto } from './dto/list-checks-query.dto';
 
-@Controller('sites/:siteId/checks')
-export class SiteChecksController {
+@Controller('monitors/:monitorId/checks')
+export class MonitorChecksController {
   constructor(private readonly checksService: ChecksService) {}
 
   @Get()
-  findForSite(@Param('siteId') siteId: string, @Query() query: ListChecksQueryDto) {
-    return this.checksService.findForSite(siteId, query.limit);
+  findForMonitor(@Param('monitorId') monitorId: string, @Query() query: ListChecksQueryDto) {
+    return this.checksService.findForMonitor(monitorId, query.limit);
   }
 }
 

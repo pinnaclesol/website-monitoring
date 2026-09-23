@@ -21,5 +21,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   }
 
   if (res.status === 204) return undefined as T;
-  return res.json();
+
+  // Defense in depth: a 2xx response with a genuinely empty body (0 bytes,
+  // not the 4-byte JSON text "null") shouldn't crash the caller with
+  // "Unexpected end of JSON input" — that's a backend bug (a NestJS
+  // controller returning a bare `null`/`undefined`, which Nest's default
+  // response handling turns into an empty body instead of writing "null"),
+  // fixed at the source where it was found (settings/signal-config), but a
+  // route re-introducing it shouldn't take the whole page down.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }

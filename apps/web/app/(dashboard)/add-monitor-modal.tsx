@@ -24,7 +24,7 @@ export function AddMonitorModal({ open, onClose, onAdded }: { open: boolean; onC
 
     setSubmitting(true);
     try {
-      await apiFetch('sites', {
+      await apiFetch('monitors', {
         method: 'POST',
         body: JSON.stringify({ domain, label: label.trim() || undefined }),
       });

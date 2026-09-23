@@ -3,8 +3,8 @@ import { Queue, Worker } from 'bullmq';
 import { createCleanupQueue, createWorker, QUEUE_NAMES, CleanupJobData } from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
 
-/** Keep the newest N Check rows per site; older rows are pruned daily. */
-const CHECKS_TO_KEEP_PER_SITE = 100;
+/** Keep the newest N MonitorCheck rows per monitor; older rows are pruned daily. */
+const CHECKS_TO_KEEP_PER_MONITOR = 100;
 
 /**
  * Stable jobId so re-registering the repeatable job on every worker restart
@@ -51,13 +51,13 @@ export class CleanupService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async trimChecks(): Promise<void> {
-    const sites = await this.prisma.site.findMany({ select: { id: true } });
+    const monitors = await this.prisma.monitor.findMany({ select: { id: true } });
 
-    for (const { id: siteId } of sites) {
-      const staleChecks = await this.prisma.check.findMany({
-        where: { siteId },
+    for (const { id: monitorId } of monitors) {
+      const staleChecks = await this.prisma.monitorCheck.findMany({
+        where: { monitorId },
         orderBy: { timestamp: 'desc' },
-        skip: CHECKS_TO_KEEP_PER_SITE,
+        skip: CHECKS_TO_KEEP_PER_MONITOR,
         select: { id: true },
       });
 
@@ -65,13 +65,13 @@ export class CleanupService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      await this.prisma.check.deleteMany({
+      await this.prisma.monitorCheck.deleteMany({
         where: { id: { in: staleChecks.map((check) => check.id) } },
       });
     }
 
     this.logger.log(
-      `cleanup: trimmed Check rows for ${sites.length} site(s) to newest ${CHECKS_TO_KEEP_PER_SITE}`
+      `cleanup: trimmed MonitorCheck rows for ${monitors.length} monitor(s) to newest ${CHECKS_TO_KEEP_PER_MONITOR}`
     );
   }
 }

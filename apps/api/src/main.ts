@@ -8,7 +8,7 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   // This workspace uses ONE root .env for every app (not a per-app .env) —
   // see CLAUDE.md's Environment Setup section. Runs before NestFactory.create
-  // instantiates any provider (e.g. SitesService's @uptime/queue field
+  // instantiates any provider (e.g. MonitorsService's @uptime/queue field
   // initializer reads REDIS_URL), which is all that matters here — nothing
   // above this line reads process.env at import time, only at instantiation
   // time. `../../../.env` resolves to the repo root from both this file's

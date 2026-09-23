@@ -15,6 +15,17 @@ build/
 libs/uptime-db/src/generated/
 libs/uptime-db/prisma/generated/
 
+# libs/auth, libs/queue, and libs/uptime-db (outside src/generated/ above) are
+# consumed as plain TS source via path aliases, never built — a stray
+# `tsc`-with-emit invocation can leave compiled .js/.js.map siblings next to
+# the .ts source; they're never imported by anything but are easy to miss.
+libs/auth/src/**/*.js
+libs/auth/src/**/*.js.map
+libs/queue/src/**/*.js
+libs/queue/src/**/*.js.map
+libs/uptime-db/src/*.js
+libs/uptime-db/src/*.js.map
+
 # Nx
 .nx/cache/
 .nx/workspace-data/

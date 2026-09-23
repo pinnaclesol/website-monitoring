@@ -6,7 +6,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { createAlertDispatchQueue, createCleanupQueue, createSiteChecksQueue } from '@uptime/queue';
+import { createAlertDispatchQueue, createCleanupQueue, createMonitorChecksQueue } from '@uptime/queue';
 import { AppModule } from './app.module';
 
 const BULL_BOARD_PATH = '/admin/queues';
@@ -77,7 +77,7 @@ async function bootstrap(): Promise<void> {
 
   createBullBoard({
     queues: [
-      new BullMQAdapter(createSiteChecksQueue()),
+      new BullMQAdapter(createMonitorChecksQueue()),
       new BullMQAdapter(createAlertDispatchQueue()),
       new BullMQAdapter(createCleanupQueue()),
     ],

@@ -15,7 +15,9 @@ import {
   useToast,
 } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
-import type { TelegramAccount, SignalConfig, EmailRecipient, NotificationSettings } from '../../../lib/types';
+import type { BrandingSettings } from '../../../lib/branding-settings';
+import type { TelegramAccount, SignalConfig, EmailRecipient, AlertSettings } from '../../../lib/types';
+import { useSiteName } from '../site-name-context';
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -34,6 +36,12 @@ function Hint({ children }: { children: React.ReactNode }) {
 
 export default function NotificationsPage() {
   const toast = useToast();
+  const breadcrumbSiteName = useSiteName();
+
+  const [brandingSettings, setBrandingSettings] = useState<BrandingSettings | null>(null);
+  const [siteName, setSiteName] = useState('');
+  const [faviconUrl, setFaviconUrl] = useState('');
+  const [savingGeneral, setSavingGeneral] = useState(false);
 
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[] | null>(null);
   const [newTgLabel, setNewTgLabel] = useState('');
@@ -50,19 +58,23 @@ export default function NotificationsPage() {
   const [newEmail, setNewEmail] = useState('');
   const [addingEmail, setAddingEmail] = useState(false);
 
-  const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [settings, setSettings] = useState<AlertSettings | null>(null);
   const [interval_, setInterval_] = useState(300);
   const [recoveryAlert, setRecoveryAlert] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const [tg, sig, email, ns] = await Promise.all([
+      const [app, tg, sig, email, ns] = await Promise.all([
+        apiFetch<BrandingSettings>('settings/branding'),
         apiFetch<TelegramAccount[]>('settings/telegram-accounts'),
         apiFetch<SignalConfig | null>('settings/signal-config'),
         apiFetch<EmailRecipient[]>('settings/email-recipients'),
-        apiFetch<NotificationSettings>('settings/notifications'),
+        apiFetch<AlertSettings>('settings/alerts'),
       ]);
+      setBrandingSettings(app);
+      setSiteName(app.siteName);
+      setFaviconUrl(app.faviconUrl ?? '');
       setTelegramAccounts(tg);
       setSignal(sig);
       if (sig) {
@@ -77,6 +89,22 @@ export default function NotificationsPage() {
     load().catch((err) => toast({ type: 'error', title: 'Could not load settings', message: err.message }));
     // Load once — this page has no live-updating data, unlike the dashboard/incidents polls.
   }, []);
+
+  async function saveGeneral() {
+    setSavingGeneral(true);
+    try {
+      const updated = await apiFetch<BrandingSettings>('settings/branding', {
+        method: 'PATCH',
+        body: JSON.stringify({ siteName: siteName.trim() || 'Uptime Monitor', faviconUrl: faviconUrl.trim() }),
+      });
+      setBrandingSettings(updated);
+      toast({ type: 'success', title: 'Settings saved', message: 'Reload the page to see the new name/icon everywhere' });
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not save settings', message: err instanceof Error ? err.message : undefined });
+    } finally {
+      setSavingGeneral(false);
+    }
+  }
 
   async function addTelegramAccount() {
     if (!newTgLabel.trim() || !newTgToken.trim() || !newTgChat.trim()) {
@@ -165,7 +193,7 @@ export default function NotificationsPage() {
   async function saveAlertBehavior() {
     setSavingSettings(true);
     try {
-      const updated = await apiFetch<NotificationSettings>('settings/notifications', {
+      const updated = await apiFetch<AlertSettings>('settings/alerts', {
         method: 'PATCH',
         body: JSON.stringify({ alertIntervalSeconds: interval_, recoveryAlertEnabled: recoveryAlert }),
       });
@@ -178,24 +206,49 @@ export default function NotificationsPage() {
     }
   }
 
-  const loading = telegramAccounts === null || emailRecipients === null || settings === null;
+  const loading =
+    brandingSettings === null || telegramAccounts === null || emailRecipients === null || settings === null;
 
   return (
     <>
       <Topbar>
-        <Breadcrumb section="Uptime Monitor" page="Notifications" />
+        <Breadcrumb section={breadcrumbSiteName} page="Settings" />
       </Topbar>
       <div className="flex-1 p-6">
         <Card className="max-w-[560px]">
           <CardHeader>
-            <CardTitle>Notification settings</CardTitle>
-            <CardDescription>Where alerts go when a site goes down</CardDescription>
+            <CardTitle>Settings</CardTitle>
+            <CardDescription>Dashboard branding and where alerts go when a site goes down</CardDescription>
           </CardHeader>
 
           {loading ? (
             <div className="px-6 pb-6 text-sm text-text-muted">Loading…</div>
           ) : (
             <div className="px-5 pb-5">
+              {/* General — dashboard branding (name shown in the sidebar/browser tab, favicon) */}
+              <SectionLabel>General</SectionLabel>
+              <div className="mb-3.5">
+                <FieldLabel>Site name</FieldLabel>
+                <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="Uptime Monitor" />
+                <Hint>Shown in the sidebar and the browser tab title</Hint>
+              </div>
+              <div className="mb-3.5">
+                <FieldLabel>
+                  Favicon / logo URL <span className="font-normal text-text-subtle">(optional)</span>
+                </FieldLabel>
+                <Input
+                  value={faviconUrl}
+                  onChange={(e) => setFaviconUrl(e.target.value)}
+                  placeholder="https://example.com/icon.png"
+                />
+                <Hint>Used as both the sidebar logo mark and the browser tab icon</Hint>
+              </div>
+              <Button size="sm" onClick={saveGeneral} disabled={savingGeneral}>
+                {savingGeneral ? 'Saving…' : 'Save general settings'}
+              </Button>
+
+              <Separator />
+
               {/* Telegram — multiple destinations, per CLAUDE.md's TelegramAccount model */}
               <SectionLabel>Telegram</SectionLabel>
               <div className="mb-3 flex flex-col gap-2">
@@ -295,7 +348,7 @@ export default function NotificationsPage() {
                   type="email"
                   className="flex-1"
                 />
-                <Button size="sm" onClick={addEmailRecipient} disabled={addingEmail}>
+                <Button onClick={addEmailRecipient} disabled={addingEmail}>
                   {addingEmail ? 'Adding…' : 'Add'}
                 </Button>
               </div>

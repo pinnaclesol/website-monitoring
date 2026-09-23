@@ -4,23 +4,23 @@ import {
   createAlertDispatchQueue,
   createWorker,
   QUEUE_NAMES,
-  SiteCheckJobData,
+  MonitorCheckJobData,
   AlertDispatchJobData,
 } from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
 
-/** GET timeout for a single site-check attempt. */
+/** GET timeout for a single monitor-check attempt. */
 const CHECK_TIMEOUT_MS = 10_000;
 
 /**
- * How many site-checks this Worker processes concurrently. This is an
+ * How many monitor checks this Worker processes concurrently. This is an
  * explicit BullMQ `Worker` option (not a hardcoded/implicit default) because
  * apps/worker needs to scale to thousands of monitors on a single consumer
  * process without a thundering herd — see CLAUDE.md's queue architecture
  * notes. 50 is a reasonable starting point for outbound HTTP checks; tune via
  * deployment config in a later pass, not by hand-editing this constant.
  */
-const SITE_CHECKS_CONCURRENCY = 50;
+const MONITOR_CHECKS_CONCURRENCY = 50;
 
 interface CheckResult {
   isUp: boolean;
@@ -32,21 +32,21 @@ interface CheckResult {
 @Injectable()
 export class ChecksService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChecksService.name);
-  private worker?: Worker<SiteCheckJobData>;
+  private worker?: Worker<MonitorCheckJobData>;
   private readonly alertDispatchQueue: Queue<AlertDispatchJobData> = createAlertDispatchQueue();
 
   constructor(private readonly prisma: UptimePrismaService) {}
 
   onModuleInit(): void {
-    this.worker = createWorker<SiteCheckJobData>(
-      QUEUE_NAMES.SITE_CHECKS,
-      (job) => this.processSiteCheck(job),
+    this.worker = createWorker<MonitorCheckJobData>(
+      QUEUE_NAMES.MONITOR_CHECKS,
+      (job) => this.processMonitorCheck(job),
       {
-        concurrency: SITE_CHECKS_CONCURRENCY,
+        concurrency: MONITOR_CHECKS_CONCURRENCY,
         // NOTE: `attempts: 2` + `backoff: { type: 'fixed', delay: 5000 }`
         // are BullMQ *job* options, set by the PRODUCER (apps/api) when it
-        // registers each site's repeatable `site-checks` job / enqueues a
-        // one-off "check now" job — retry/backoff is configured at
+        // registers each monitor's repeatable `monitor-checks` job / enqueues
+        // a one-off "check now" job — retry/backoff is configured at
         // `Queue.add()` time, not on the Worker, and this Worker must not
         // redeclare or fight that here. This Worker only needs to *behave*
         // correctly under that retry policy (see isFinalAttempt below):
@@ -55,7 +55,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     );
 
     this.worker.on('error', (err) => {
-      this.logger.error(`site-checks worker error: ${err.message}`);
+      this.logger.error(`monitor-checks worker error: ${err.message}`);
     });
   }
 
@@ -64,8 +64,8 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     await this.alertDispatchQueue.close();
   }
 
-  private async processSiteCheck(job: Job<SiteCheckJobData>): Promise<void> {
-    const { siteId, domain } = job.data;
+  private async processMonitorCheck(job: Job<MonitorCheckJobData>): Promise<void> {
+    const { monitorId, domain } = job.data;
     const url = `https://${domain}`;
 
     // job.attemptsMade counts *prior* attempts (0 on the first run), so
@@ -78,12 +78,12 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     if (!result.isUp && !isFinalAttempt) {
       // Let BullMQ's native attempts/backoff retry this job — a check only
       // counts as confirmed-down once both attempts have failed, so we
-      // deliberately do not write a Check row (or run alert logic) yet.
-      // Throwing here is what tells BullMQ to schedule the retry.
-      throw new Error(result.error ?? `Site check failed for ${domain}`);
+      // deliberately do not write a MonitorCheck row (or run alert logic)
+      // yet. Throwing here is what tells BullMQ to schedule the retry.
+      throw new Error(result.error ?? `Monitor check failed for ${domain}`);
     }
 
-    await this.writeCheckResult(siteId, result);
+    await this.writeCheckResult(monitorId, result);
   }
 
   /** Never throws — network errors/timeouts are captured into the result. */
@@ -95,8 +95,8 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     try {
       const response = await fetch(url, { signal: controller.signal, redirect: 'follow' });
       const responseTimeMs = Date.now() - startedAt;
-      // 2xx/3xx counts as up; 4xx/5xx counts as down — the site responded,
-      // but a monitor should still flag it as an outage.
+      // 2xx/3xx counts as up; 4xx/5xx counts as down — the monitor
+      // responded, but should still be flagged as an outage.
       const isUp = response.status >= 200 && response.status < 400;
 
       return {
@@ -115,10 +115,10 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async writeCheckResult(siteId: string, result: CheckResult): Promise<void> {
-    await this.prisma.check.create({
+  private async writeCheckResult(monitorId: string, result: CheckResult): Promise<void> {
+    await this.prisma.monitorCheck.create({
       data: {
-        siteId,
+        monitorId,
         isUp: result.isUp,
         statusCode: result.statusCode,
         responseTimeMs: result.responseTimeMs,
@@ -126,7 +126,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    await this.runAlertStateMachine(siteId, result.isUp);
+    await this.runAlertStateMachine(monitorId, result.isUp);
   }
 
   /**
@@ -134,49 +134,50 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
    * .claude/agents/worker-agent.md's "Alert-state machine" section — these
    * are hard invariants, not guidelines:
    *   - up -> confirmed-down: open exactly one new Incident, set
-   *     AlertState.isDown = true, lastAlertSentAt = now, enqueue a `down`
-   *     alert-dispatch job.
+   *     MonitorAlertState.isDown = true, lastAlertSentAt = now, enqueue a
+   *     `down` alert-dispatch job.
    *   - still down, interval elapsed: enqueue a `reminder` alert-dispatch
    *     job, bump lastAlertSentAt. Never before the interval elapses.
    *   - down -> recovered: close the open Incident, enqueue a `recovery`
    *     alert-dispatch job (with downtimeMs) only if recoveryAlertEnabled,
-   *     clear AlertState.isDown.
-   *   - Never open a second Incident for an already-down site; never leave
-   *     an Incident open after a recovered check.
+   *     clear MonitorAlertState.isDown.
+   *   - Never open a second Incident for an already-down monitor; never
+   *     leave an Incident open after a recovered check.
    *
    * Known limitation: this isn't wrapped in a DB transaction/lock. A single
-   * site only ever has one repeatable job, so under normal operation there's
-   * no concurrent check for the same site — a manual "check now" racing the
-   * repeatable job for the same site is the one edge case that could
-   * theoretically double-fire, acceptable for now, not addressed here.
+   * monitor only ever has one repeatable job, so under normal operation
+   * there's no concurrent check for the same monitor — a manual "check now"
+   * racing the repeatable job for the same monitor is the one edge case
+   * that could theoretically double-fire, acceptable for now, not addressed
+   * here.
    */
-  private async runAlertStateMachine(siteId: string, isUp: boolean): Promise<void> {
-    const existingState = await this.prisma.alertState.findUnique({ where: { siteId } });
+  private async runAlertStateMachine(monitorId: string, isUp: boolean): Promise<void> {
+    const existingState = await this.prisma.monitorAlertState.findUnique({ where: { monitorId } });
     const wasDown = existingState?.isDown ?? false;
     const now = new Date();
 
     if (!isUp && !wasDown) {
       // up -> confirmed-down
       const openIncident = await this.prisma.incident.findFirst({
-        where: { siteId, endedAt: null },
+        where: { monitorId, endedAt: null },
       });
       if (!openIncident) {
-        await this.prisma.incident.create({ data: { siteId, startedAt: now } });
+        await this.prisma.incident.create({ data: { monitorId, startedAt: now } });
       }
 
-      await this.prisma.alertState.upsert({
-        where: { siteId },
+      await this.prisma.monitorAlertState.upsert({
+        where: { monitorId },
         update: { isDown: true, lastAlertSentAt: now },
-        create: { siteId, isDown: true, lastAlertSentAt: now },
+        create: { monitorId, isDown: true, lastAlertSentAt: now },
       });
 
-      await this.enqueueAlert(siteId, 'down', now);
+      await this.enqueueAlert(monitorId, 'down', now);
       return;
     }
 
     if (!isUp && wasDown) {
-      // still down — reminder, gated by NotificationSettings.alertIntervalSeconds
-      const settings = await this.prisma.notificationSettings.findFirst({
+      // still down — reminder, gated by AlertSettings.alertIntervalSeconds
+      const settings = await this.prisma.alertSettings.findFirst({
         orderBy: { createdAt: 'asc' },
       });
       const intervalMs = (settings?.alertIntervalSeconds ?? 300) * 1000;
@@ -184,11 +185,11 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
       const dueForReminder = !lastSent || now.getTime() - lastSent.getTime() >= intervalMs;
 
       if (dueForReminder) {
-        await this.prisma.alertState.update({
-          where: { siteId },
+        await this.prisma.monitorAlertState.update({
+          where: { monitorId },
           data: { lastAlertSentAt: now },
         });
-        await this.enqueueAlert(siteId, 'reminder', now);
+        await this.enqueueAlert(monitorId, 'reminder', now);
       }
       return;
     }
@@ -196,7 +197,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     if (isUp && wasDown) {
       // down -> recovered
       const openIncident = await this.prisma.incident.findFirst({
-        where: { siteId, endedAt: null },
+        where: { monitorId, endedAt: null },
         orderBy: { startedAt: 'desc' },
       });
       if (openIncident) {
@@ -206,17 +207,17 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
         });
       }
 
-      await this.prisma.alertState.update({
-        where: { siteId },
+      await this.prisma.monitorAlertState.update({
+        where: { monitorId },
         data: { isDown: false },
       });
 
-      const settings = await this.prisma.notificationSettings.findFirst({
+      const settings = await this.prisma.alertSettings.findFirst({
         orderBy: { createdAt: 'asc' },
       });
       if (settings?.recoveryAlertEnabled ?? true) {
         const downtimeMs = openIncident ? now.getTime() - openIncident.startedAt.getTime() : undefined;
-        await this.enqueueAlert(siteId, 'recovery', now, downtimeMs);
+        await this.enqueueAlert(monitorId, 'recovery', now, downtimeMs);
       }
       return;
     }
@@ -225,13 +226,13 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async enqueueAlert(
-    siteId: string,
+    monitorId: string,
     event: AlertDispatchJobData['event'],
     occurredAt: Date,
     downtimeMs?: number
   ): Promise<void> {
     await this.alertDispatchQueue.add(`alert-${event}`, {
-      siteId,
+      monitorId,
       event,
       occurredAt: occurredAt.toISOString(),
       downtimeMs,

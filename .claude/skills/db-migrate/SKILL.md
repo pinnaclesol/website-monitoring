@@ -12,7 +12,7 @@ Migration name: `$ARGUMENTS`
 ## Rules
 
 - All Prisma work targets `libs/uptime-db/prisma/schema.prisma`.
-- `DATABASE_URL` is read from `libs/uptime-db/.env` — not from `apps/api/.env` or `apps/worker/.env`.
+- `DATABASE_URL` is read from the repo-root `.env` — this workspace uses ONE root `.env` for every app/lib, not a per-app/per-lib one (see CLAUDE.md's Environment Setup section).
 - Never create a `prisma/` folder inside `apps/api` or `apps/worker` — neither has its own Prisma.
 - Never run `prisma migrate reset` — it wipes all data.
 - Warn the user before any migration that drops columns or tables.
@@ -27,9 +27,9 @@ cat libs/uptime-db/prisma/schema.prisma
 
 ### 2. Verify DATABASE_URL is set
 ```bash
-grep DATABASE_URL libs/uptime-db/.env
+grep DATABASE_URL .env
 ```
-If missing, tell the user to add `DATABASE_URL=postgresql://...` pointing to the dedicated uptime-monitor DB.
+If missing, tell the user to add `DATABASE_URL=postgresql://...` pointing to the dedicated uptime-monitor DB, in the repo-root `.env`.
 
 ### 3. Add or update the model
 ```prisma
