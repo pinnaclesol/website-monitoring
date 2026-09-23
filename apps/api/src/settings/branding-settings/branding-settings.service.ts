@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UptimePrismaService } from '@uptime/uptime-db';
 import { UpdateBrandingSettingsDto } from './dto/update-branding-settings.dto';
 
-/** Singleton row: dashboard branding (site name, favicon/logo). Same app-enforced-singleton pattern as AlertSettings. */
+/** Singleton row: dashboard branding — appName/appLogoUrl (sidebar) and siteTitle/faviconUrl (browser tab). Same app-enforced-singleton pattern as AlertSettings. */
 @Injectable()
 export class BrandingSettingsService {
   constructor(private readonly prisma: UptimePrismaService) {}
@@ -10,7 +10,7 @@ export class BrandingSettingsService {
   async getOrCreate() {
     const existing = await this.prisma.brandingSettings.findFirst({ orderBy: { createdAt: 'asc' } });
     if (existing) return existing;
-    // Default siteName ("Uptime Monitor") comes from the Prisma schema.
+    // Defaults ("Uptime Monitor") come from the Prisma schema.
     return this.prisma.brandingSettings.create({ data: {} });
   }
 
@@ -19,7 +19,9 @@ export class BrandingSettingsService {
     return this.prisma.brandingSettings.update({
       where: { id: current.id },
       data: {
-        ...(dto.siteName !== undefined ? { siteName: dto.siteName } : {}),
+        ...(dto.appName !== undefined ? { appName: dto.appName } : {}),
+        ...(dto.appLogoUrl !== undefined ? { appLogoUrl: dto.appLogoUrl || null } : {}),
+        ...(dto.siteTitle !== undefined ? { siteTitle: dto.siteTitle } : {}),
         ...(dto.faviconUrl !== undefined ? { faviconUrl: dto.faviconUrl || null } : {}),
       },
     });

@@ -7,7 +7,7 @@ import { DashboardNav } from './dashboard-nav';
 import { SiteNameProvider } from './site-name-context';
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
-  const [session, { siteName, faviconUrl }] = await Promise.all([
+  const [session, { appName, appLogoUrl }] = await Promise.all([
     getServerSession(authOptions),
     getBrandingSettings(),
   ]);
@@ -17,9 +17,9 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   }
 
   return (
-    <SiteNameProvider siteName={siteName}>
+    <SiteNameProvider appName={appName} appLogoUrl={appLogoUrl}>
       <div className="min-h-screen bg-bg">
-        <DashboardNav username={session.user.username} siteName={siteName} iconUrl={faviconUrl} />
+        <DashboardNav username={session.user.username} name={session.user.name} role={session.user.role} />
         <div className="ml-[248px] flex min-h-screen flex-col">{children}</div>
       </div>
     </SiteNameProvider>

@@ -1,21 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  Topbar,
-  Breadcrumb,
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  Input,
-  Button,
-  Toggle,
-  Badge,
-  useToast,
-} from '@uptime/ui';
+import { useSession } from 'next-auth/react';
+import { hasPermission } from '@uptime/auth';
+import { Topbar, Breadcrumb, Card, CardHeader, CardTitle, CardDescription, Input, Button, Toggle, Badge, useToast } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
-import type { BrandingSettings } from '../../../lib/branding-settings';
 import type { TelegramAccount, SignalConfig, EmailRecipient, AlertSettings } from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
 
@@ -37,11 +26,8 @@ function Hint({ children }: { children: React.ReactNode }) {
 export default function NotificationsPage() {
   const toast = useToast();
   const breadcrumbSiteName = useSiteName();
-
-  const [brandingSettings, setBrandingSettings] = useState<BrandingSettings | null>(null);
-  const [siteName, setSiteName] = useState('');
-  const [faviconUrl, setFaviconUrl] = useState('');
-  const [savingGeneral, setSavingGeneral] = useState(false);
+  const { data: session } = useSession();
+  const canUpdate = !!session?.user.role && hasPermission(session.user.role, 'notifications:update');
 
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[] | null>(null);
   const [newTgLabel, setNewTgLabel] = useState('');
@@ -65,16 +51,12 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     async function load() {
-      const [app, tg, sig, email, ns] = await Promise.all([
-        apiFetch<BrandingSettings>('settings/branding'),
+      const [tg, sig, email, ns] = await Promise.all([
         apiFetch<TelegramAccount[]>('settings/telegram-accounts'),
         apiFetch<SignalConfig | null>('settings/signal-config'),
         apiFetch<EmailRecipient[]>('settings/email-recipients'),
         apiFetch<AlertSettings>('settings/alerts'),
       ]);
-      setBrandingSettings(app);
-      setSiteName(app.siteName);
-      setFaviconUrl(app.faviconUrl ?? '');
       setTelegramAccounts(tg);
       setSignal(sig);
       if (sig) {
@@ -89,22 +71,6 @@ export default function NotificationsPage() {
     load().catch((err) => toast({ type: 'error', title: 'Could not load settings', message: err.message }));
     // Load once — this page has no live-updating data, unlike the dashboard/incidents polls.
   }, []);
-
-  async function saveGeneral() {
-    setSavingGeneral(true);
-    try {
-      const updated = await apiFetch<BrandingSettings>('settings/branding', {
-        method: 'PATCH',
-        body: JSON.stringify({ siteName: siteName.trim() || 'Uptime Monitor', faviconUrl: faviconUrl.trim() }),
-      });
-      setBrandingSettings(updated);
-      toast({ type: 'success', title: 'Settings saved', message: 'Reload the page to see the new name/icon everywhere' });
-    } catch (err) {
-      toast({ type: 'error', title: 'Could not save settings', message: err instanceof Error ? err.message : undefined });
-    } finally {
-      setSavingGeneral(false);
-    }
-  }
 
   async function addTelegramAccount() {
     if (!newTgLabel.trim() || !newTgToken.trim() || !newTgChat.trim()) {
@@ -206,49 +172,24 @@ export default function NotificationsPage() {
     }
   }
 
-  const loading =
-    brandingSettings === null || telegramAccounts === null || emailRecipients === null || settings === null;
+  const loading = telegramAccounts === null || emailRecipients === null || settings === null;
 
   return (
     <>
       <Topbar>
-        <Breadcrumb section={breadcrumbSiteName} page="Settings" />
+        <Breadcrumb section={breadcrumbSiteName} page="Notifications" />
       </Topbar>
       <div className="flex-1 p-6">
         <Card className="max-w-[560px]">
           <CardHeader>
-            <CardTitle>Settings</CardTitle>
-            <CardDescription>Dashboard branding and where alerts go when a site goes down</CardDescription>
+            <CardTitle>Notifications</CardTitle>
+            <CardDescription>Where alerts go when a monitor goes down</CardDescription>
           </CardHeader>
 
           {loading ? (
             <div className="px-6 pb-6 text-sm text-text-muted">Loading…</div>
           ) : (
             <div className="px-5 pb-5">
-              {/* General — dashboard branding (name shown in the sidebar/browser tab, favicon) */}
-              <SectionLabel>General</SectionLabel>
-              <div className="mb-3.5">
-                <FieldLabel>Site name</FieldLabel>
-                <Input value={siteName} onChange={(e) => setSiteName(e.target.value)} placeholder="Uptime Monitor" />
-                <Hint>Shown in the sidebar and the browser tab title</Hint>
-              </div>
-              <div className="mb-3.5">
-                <FieldLabel>
-                  Favicon / logo URL <span className="font-normal text-text-subtle">(optional)</span>
-                </FieldLabel>
-                <Input
-                  value={faviconUrl}
-                  onChange={(e) => setFaviconUrl(e.target.value)}
-                  placeholder="https://example.com/icon.png"
-                />
-                <Hint>Used as both the sidebar logo mark and the browser tab icon</Hint>
-              </div>
-              <Button size="sm" onClick={saveGeneral} disabled={savingGeneral}>
-                {savingGeneral ? 'Saving…' : 'Save general settings'}
-              </Button>
-
-              <Separator />
-
               {/* Telegram — multiple destinations, per CLAUDE.md's TelegramAccount model */}
               <SectionLabel>Telegram</SectionLabel>
               <div className="mb-3 flex flex-col gap-2">
@@ -263,13 +204,15 @@ export default function NotificationsPage() {
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
                       <Badge status={account.isActive ? 'up' : 'paused'} label={account.isActive ? 'Active' : 'Inactive'} />
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeTelegramAccount(account.id, account.label)}
-                      >
-                        Remove
-                      </Button>
+                      {canUpdate ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeTelegramAccount(account.id, account.label)}
+                        >
+                          Remove
+                        </Button>
+                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -277,26 +220,28 @@ export default function NotificationsPage() {
                   <div className="text-[13px] text-text-muted">No Telegram destinations yet.</div>
                 ) : null}
               </div>
-              <div className="rounded border border-dashed border-border-strong p-3">
-                <div className="mb-2 grid gap-2 sm:grid-cols-3">
-                  <Input
-                    value={newTgLabel}
-                    onChange={(e) => setNewTgLabel(e.target.value)}
-                    placeholder="Label (e.g. Ops team)"
-                  />
-                  <Input
-                    value={newTgToken}
-                    onChange={(e) => setNewTgToken(e.target.value)}
-                    placeholder="Bot token"
-                    type="password"
-                  />
-                  <Input value={newTgChat} onChange={(e) => setNewTgChat(e.target.value)} placeholder="Chat ID" />
+              {canUpdate ? (
+                <div className="rounded border border-dashed border-border-strong p-3">
+                  <div className="mb-2 grid gap-2 sm:grid-cols-3">
+                    <Input
+                      value={newTgLabel}
+                      onChange={(e) => setNewTgLabel(e.target.value)}
+                      placeholder="Label (e.g. Ops team)"
+                    />
+                    <Input
+                      value={newTgToken}
+                      onChange={(e) => setNewTgToken(e.target.value)}
+                      placeholder="Bot token"
+                      type="password"
+                    />
+                    <Input value={newTgChat} onChange={(e) => setNewTgChat(e.target.value)} placeholder="Chat ID" />
+                  </div>
+                  <Hint>Get a bot token from @BotFather on Telegram</Hint>
+                  <Button size="sm" className="mt-2" onClick={addTelegramAccount} disabled={addingTg}>
+                    {addingTg ? 'Adding…' : 'Add Telegram destination'}
+                  </Button>
                 </div>
-                <Hint>Get a bot token from @BotFather on Telegram</Hint>
-                <Button size="sm" className="mt-2" onClick={addTelegramAccount} disabled={addingTg}>
-                  {addingTg ? 'Adding…' : 'Add Telegram destination'}
-                </Button>
-              </div>
+              ) : null}
 
               <Separator />
 
@@ -304,7 +249,12 @@ export default function NotificationsPage() {
               <SectionLabel>Signal</SectionLabel>
               <div className="mb-3.5">
                 <FieldLabel>Sender phone number</FieldLabel>
-                <Input value={signalSender} onChange={(e) => setSignalSender(e.target.value)} placeholder="+15550000000" />
+                <Input
+                  value={signalSender}
+                  onChange={(e) => setSignalSender(e.target.value)}
+                  placeholder="+15550000000"
+                  disabled={!canUpdate}
+                />
                 <Hint>The number registered with signal-cli-rest-api</Hint>
               </div>
               <div className="mb-3.5">
@@ -313,12 +263,15 @@ export default function NotificationsPage() {
                   value={signalRecipient}
                   onChange={(e) => setSignalRecipient(e.target.value)}
                   placeholder="+15551111111"
+                  disabled={!canUpdate}
                 />
                 <Hint>Who receives the alert messages</Hint>
               </div>
-              <Button size="sm" onClick={saveSignal} disabled={savingSignal}>
-                {savingSignal ? 'Saving…' : signal ? 'Update Signal settings' : 'Save Signal settings'}
-              </Button>
+              {canUpdate ? (
+                <Button size="sm" onClick={saveSignal} disabled={savingSignal}>
+                  {savingSignal ? 'Saving…' : signal ? 'Update Signal settings' : 'Save Signal settings'}
+                </Button>
+              ) : null}
 
               <Separator />
 
@@ -331,27 +284,31 @@ export default function NotificationsPage() {
                     className="flex items-center justify-between gap-2 rounded border border-border bg-bg-secondary px-3 py-2"
                   >
                     <span className="truncate text-[13px] text-text">{recipient.email}</span>
-                    <Button variant="ghost" size="sm" onClick={() => removeEmailRecipient(recipient.id, recipient.email)}>
-                      Remove
-                    </Button>
+                    {canUpdate ? (
+                      <Button variant="ghost" size="sm" onClick={() => removeEmailRecipient(recipient.id, recipient.email)}>
+                        Remove
+                      </Button>
+                    ) : null}
                   </div>
                 ))}
                 {emailRecipients!.length === 0 ? (
                   <div className="text-[13px] text-text-muted">No email recipients yet.</div>
                 ) : null}
               </div>
-              <div className="flex gap-2">
-                <Input
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="ops@yourcompany.com"
-                  type="email"
-                  className="flex-1"
-                />
-                <Button onClick={addEmailRecipient} disabled={addingEmail}>
-                  {addingEmail ? 'Adding…' : 'Add'}
-                </Button>
-              </div>
+              {canUpdate ? (
+                <div className="flex gap-2">
+                  <Input
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="ops@yourcompany.com"
+                    type="email"
+                    className="flex-1"
+                  />
+                  <Button onClick={addEmailRecipient} disabled={addingEmail}>
+                    {addingEmail ? 'Adding…' : 'Add'}
+                  </Button>
+                </div>
+              ) : null}
 
               <Separator />
 
@@ -366,23 +323,26 @@ export default function NotificationsPage() {
                     value={interval_}
                     onChange={(e) => setInterval_(Number(e.target.value))}
                     className="w-[100px] rounded-r-none border-r-0"
+                    disabled={!canUpdate}
                   />
                   <span className="flex items-center rounded rounded-l-none border border-border-strong bg-bg-muted px-3 text-[13px] text-text-muted">
                     seconds
                   </span>
                 </div>
-                <Hint>How often to re-send while a site is still down.</Hint>
+                <Hint>How often to re-send while a monitor is still down.</Hint>
               </div>
               <div className="mb-4">
                 <FieldLabel>Send recovery alert</FieldLabel>
                 <div className="mt-1.5 flex items-center gap-2.5">
-                  <Toggle checked={recoveryAlert} onCheckedChange={setRecoveryAlert} />
-                  <span className="text-[13px] text-text-muted">Notify when a downed site comes back online</span>
+                  <Toggle checked={recoveryAlert} onCheckedChange={setRecoveryAlert} disabled={!canUpdate} />
+                  <span className="text-[13px] text-text-muted">Notify when a downed monitor comes back online</span>
                 </div>
               </div>
-              <Button onClick={saveAlertBehavior} disabled={savingSettings}>
-                {savingSettings ? 'Saving…' : 'Save settings'}
-              </Button>
+              {canUpdate ? (
+                <Button onClick={saveAlertBehavior} disabled={savingSettings}>
+                  {savingSettings ? 'Saving…' : 'Save settings'}
+                </Button>
+              ) : null}
             </div>
           )}
         </Card>

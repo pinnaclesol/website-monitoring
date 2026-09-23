@@ -1,3 +1,5 @@
+import type { Role } from '@uptime/auth';
+
 /** Mirrors apps/api's enriched GET /api/monitors response shape (monitors.service.ts's `enrich()`). */
 export interface MonitorWithStatus {
   id: string;
@@ -60,4 +62,17 @@ export interface EmailRecipient {
   id: string;
   email: string;
   isActive: boolean;
+}
+
+/** Mirrors apps/api's `users` resource response shape — never includes password. */
+export interface UserRecord {
+  id: string;
+  username: string;
+  name: string | null;
+  role: Role;
+  /** The one bootstrap admin account — immutable via this API, by anyone. */
+  isProtected: boolean;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
 }

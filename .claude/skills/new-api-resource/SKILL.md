@@ -53,7 +53,7 @@ export class <PascalCase>Service {
 ```
 
 ### 4. Create the controller
-`apps/api/src/<resource>/<resource>.controller.ts` — standard REST verbs, DTOs on `@Body()`, no `@Permission()` decorators (this app has no RBAC).
+`apps/api/src/<resource>/<resource>.controller.ts` — standard REST verbs, DTOs on `@Body()`, each handler decorated with `@RequirePermission('<resource>:<action>')` (from `apps/api/src/common/decorators/require-permission.decorator.ts`) matching the fixed `ADMIN`/`EDITOR`/`VIEWER` permission map in `@uptime/auth`.
 
 ### 5. Create the module
 `apps/api/src/<resource>/<resource>.module.ts`, register in `apps/api/src/app.module.ts`.

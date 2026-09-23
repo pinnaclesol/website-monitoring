@@ -11,9 +11,9 @@ import { getBrandingSettings } from '../lib/branding-settings';
  * /login too, not just inside the dashboard.
  */
 export async function generateMetadata(): Promise<Metadata> {
-  const { siteName, faviconUrl } = await getBrandingSettings();
+  const { siteTitle, faviconUrl } = await getBrandingSettings();
   return {
-    title: siteName,
+    title: siteTitle,
     description: 'Self-hosted uptime monitoring dashboard.',
     icons: faviconUrl ? { icon: faviconUrl } : undefined,
   };

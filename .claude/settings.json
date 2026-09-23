@@ -1,6 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "sonnet",
+  "env": {
+    "NX_DAEMON": "false"
+  },
   "permissions": {
     "allow": [
       "Bash(npm run *)",
@@ -12,7 +14,67 @@
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(git checkout *)",
-      "Bash(git branch *)"
+      "Bash(git branch *)",
+      "Bash(node run-prisma.js *)",
+      "Bash(npx tsx *)",
+      "Edit(/.claude/skills/new-api-resource/**)",
+      "Bash(npx nx *)",
+      "Bash(grep -n \"RBAC\\\\|roles/permissions\\\\|ADMIN.*EDITOR.*VIEWER\\\\|Users \\(\\\\`/users\\\\`\" CLAUDE.md)",
+      "Bash(netstat -ano)",
+      "Bash(disown)",
+      "Bash(echo \"started, pid: $!\")",
+      "Bash(curl -s http://localhost:4001/api/auth/validate -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"nope\",\"password\":\"nope\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:4002/health -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(taskkill //F //T //PID 1015)",
+      "Bash(taskkill //F //PID 27144)",
+      "Bash(taskkill //F //PID 18932)",
+      "Bash(taskkill //F //PID 28464)",
+      "Bash(tasklist)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\devel\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--projects-billing-manager-uptime-monitor-website-monitoring\\\\442f7589-ff53-4ec3-a789-b8800d22dc4a\\\\scratchpad\\\\find-lock.ps1\")",
+      "Bash(tasklist //FI \"PID eq 24264\")",
+      "Bash(tasklist //FI \"PID eq 24412\")",
+      "Bash(taskkill //F //PID 24264)",
+      "Bash(taskkill //F //PID 24412)",
+      "Bash(node -e ' *)",
+      "Bash(DOTENV_CONFIG_PATH=.env node -r dotenv/config -e ' *)",
+      "Bash(tasklist //FI \"PID eq 30596\")",
+      "Bash(taskkill //F //PID 30596)",
+      "Bash(tasklist //FI \"PID eq 16736\")",
+      "Bash(tasklist //FI \"PID eq 12876\")",
+      "Bash(taskkill //F //PID 16736)",
+      "Bash(taskkill //F //PID 12876)",
+      "Bash(grep -B5 \"data-theme=\\\\\"dark\\\\\"\" /tmp/dev-server.log | head -30 *)",
+      "Bash(taskkill //F //PID 15092)",
+      "Bash(taskkill //F //PID 11184)",
+      "Bash(taskkill //F //PID 30212)",
+      "Bash(taskkill //F //PID 18788)",
+      "Bash(taskkill //F //PID 33640)",
+      "Bash(taskkill //F //PID 7708)",
+      "Bash(taskkill //F //PID 12948)",
+      "Bash(taskkill //F //PID 22232)",
+      "Bash(rm -f /tmp/nextauth-cookies2.txt /tmp/nextauth-cookies.txt /tmp/users-page.html)",
+      "Bash(taskkill //F //PID 5572)",
+      "Bash(taskkill //F //PID 35852)",
+      "Bash(taskkill //F //PID 35904)",
+      "Bash(taskkill //F //PID 25268)",
+      "Bash(taskkill //F //PID 13140)",
+      "Bash(taskkill //F //PID 36796)",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(curl -s http://localhost:4000/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -o /dev/null -w \"HTTP %{http_code}, size: %{size_download} bytes\\\\n\")",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@__TRACKED_VAR__/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(MSYS_NO_PATHCONV=1 curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(rm -f \"D:/projects/billing-manager/uptime-monitor/website-monitoring/apps/web/public/uploads/\"*.png *)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/api/settings/branding)",
+      "Bash(curl -s http://localhost:4000/login)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/api/users)",
+      "Bash(curl -sI http://localhost:4000/login)",
+      "Bash(curl -s http://localhost:4000/login?nocache=__TRACKED_VAR__)",
+      "Bash(taskkill //F //PID 36876)",
+      "Bash(taskkill //F //PID 40016)",
+      "Bash(taskkill //F //PID 36528)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/)"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -20,8 +82,13 @@
       "Bash(git reset --hard*)",
       "Bash(DROP *)",
       "Bash(npx prisma migrate reset*)"
+    ],
+    "additionalDirectories": [
+      "\\tmp",
+      "D:\\projects\\billing-manager\\uptime-monitor\\website-monitoring\\apps\\web\\public\\uploads"
     ]
   },
+  "model": "sonnet",
   "hooks": {
     "SessionStart": [
       {
@@ -59,8 +126,5 @@
         ]
       }
     ]
-  },
-  "env": {
-    "NX_DAEMON": "false"
   }
 }

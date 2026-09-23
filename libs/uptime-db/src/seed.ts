@@ -16,6 +16,9 @@ const BCRYPT_SALT_ROUNDS = 10;
 async function main() {
   const username = process.env.ADMIN_USERNAME;
   const password = process.env.ADMIN_PASSWORD;
+  // Optional — falls back to "Super Admin" if unset, matching the display
+  // name shown for this account everywhere else (sidebar, Users list).
+  const name = process.env.ADMIN_NAME || 'Super Admin';
 
   if (!username || !password) {
     throw new Error(
@@ -30,8 +33,8 @@ async function main() {
 
     const user = await prisma.user.upsert({
       where: { username },
-      update: { password: hashedPassword, active: true },
-      create: { username, password: hashedPassword, active: true },
+      update: { password: hashedPassword, active: true, role: 'ADMIN', isProtected: true, name },
+      create: { username, password: hashedPassword, active: true, role: 'ADMIN', isProtected: true, name },
     });
 
     console.log(`[Uptime-DB] Admin user "${user.username}" is ready.`);

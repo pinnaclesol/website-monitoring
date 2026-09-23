@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSession } from 'next-auth/react';
+import { hasPermission } from '@uptime/auth';
 import {
   Topbar,
   Breadcrumb,
@@ -81,6 +83,11 @@ function RefreshIcon() {
 
 export default function DashboardPage() {
   const siteName = useSiteName();
+  const { data: session } = useSession();
+  const role = session?.user.role;
+  const canCreate = !!role && hasPermission(role, 'monitors:create');
+  const canUpdate = !!role && hasPermission(role, 'monitors:update');
+  const canDelete = !!role && hasPermission(role, 'monitors:delete');
   const [monitors, setMonitors] = useState<MonitorWithStatus[] | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -185,10 +192,12 @@ export default function DashboardPage() {
               </span>
               Refreshing in <span className="font-mono font-medium text-text-muted">{secondsToRefresh}s</span>
             </span>
-            <Button variant="outline" size="sm" onClick={checkAll} disabled={checkingAll}>
-              <RefreshIcon />
-              {checkingAll ? 'Queuing…' : 'Check all'}
-            </Button>
+            {canUpdate ? (
+              <Button variant="outline" size="sm" onClick={checkAll} disabled={checkingAll}>
+                <RefreshIcon />
+                {checkingAll ? 'Queuing…' : 'Check all'}
+              </Button>
+            ) : null}
           </>
         }
       >
@@ -272,10 +281,12 @@ export default function DashboardPage() {
                   <SelectItem value="paused">Paused only</SelectItem>
                 </SelectContent>
               </Select>
-              <Button onClick={() => setAddOpen(true)}>
-                <PlusIcon />
-                Add monitor
-              </Button>
+              {canCreate ? (
+                <Button onClick={() => setAddOpen(true)}>
+                  <PlusIcon />
+                  Add monitor
+                </Button>
+              ) : null}
             </div>
           </CardHeader>
 
@@ -315,6 +326,8 @@ export default function DashboardPage() {
                     <MonitorRow
                       key={monitor.id}
                       monitor={monitor}
+                      canUpdate={canUpdate}
+                      canDelete={canDelete}
                       onChanged={load}
                       onDeleteRequested={setDeleteTarget}
                     />
@@ -326,7 +339,7 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      <AddMonitorModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={load} />
+      {canCreate ? <AddMonitorModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={load} /> : null}
 
       <ConfirmDialog
         open={deleteTarget !== null}

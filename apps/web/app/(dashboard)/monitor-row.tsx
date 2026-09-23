@@ -52,10 +52,14 @@ function DotsIcon() {
 
 export function MonitorRow({
   monitor,
+  canUpdate,
+  canDelete,
   onChanged,
   onDeleteRequested,
 }: {
   monitor: MonitorWithStatus;
+  canUpdate: boolean;
+  canDelete: boolean;
   onChanged: () => void;
   onDeleteRequested: (monitor: MonitorWithStatus) => void;
 }) {
@@ -100,6 +104,7 @@ export function MonitorRow({
         <Toggle
           checked={!monitor.isPaused}
           onCheckedChange={togglePause}
+          disabled={!canUpdate}
           aria-label={monitor.isPaused ? 'Resume monitoring' : 'Pause monitoring'}
         />
       </td>
@@ -130,9 +135,11 @@ export function MonitorRow({
       </td>
       <td className="px-5 py-2.5">
         <div className="flex items-center gap-0.5">
-          <Button variant="ghost" size="sm" className="p-1.5" title="Check now" onClick={checkNow}>
-            <CheckNowIcon />
-          </Button>
+          {canUpdate ? (
+            <Button variant="ghost" size="sm" className="p-1.5" title="Check now" onClick={checkNow}>
+              <CheckNowIcon />
+            </Button>
+          ) : null}
           <Dropdown>
             <DropdownTrigger asChild>
               <Button variant="ghost" size="sm" className="p-1.5">
@@ -144,10 +151,14 @@ export function MonitorRow({
               <DropdownItem onClick={() => window.open(`https://${monitor.domain}`, '_blank', 'noopener')}>
                 Open site
               </DropdownItem>
-              <DropdownSeparator />
-              <DropdownItem danger onClick={() => onDeleteRequested(monitor)}>
-                Remove
-              </DropdownItem>
+              {canDelete ? (
+                <>
+                  <DropdownSeparator />
+                  <DropdownItem danger onClick={() => onDeleteRequested(monitor)}>
+                    Remove
+                  </DropdownItem>
+                </>
+              ) : null}
             </DropdownContent>
           </Dropdown>
         </div>

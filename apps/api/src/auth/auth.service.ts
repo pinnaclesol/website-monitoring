@@ -28,6 +28,6 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return { id: user.id, username: user.username };
+    return { id: user.id, username: user.username, name: user.name, role: user.role };
   }
 }

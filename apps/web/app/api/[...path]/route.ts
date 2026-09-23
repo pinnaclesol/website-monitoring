@@ -13,7 +13,11 @@ import { authOptions } from '../../../lib/auth';
  * Session-gated: every proxied call requires an authenticated NextAuth
  * session, independent of apps/api's own INTERNAL_API_KEY guard — otherwise
  * this route would be an unauthenticated back door into apps/api from
- * anyone who can reach apps/web.
+ * anyone who can reach apps/web. Forwards `x-internal-api-key` (proves the
+ * call came from this trusted proxy) and `x-user-id` (identifies which user
+ * is calling, so apps/api's permission guard can enforce role-based access
+ * server-side — the real security boundary; anything apps/web does to
+ * hide/disable controls client-side is just a UX nicety on top of this).
  */
 async function proxy(req: NextRequest, path: string[]): Promise<NextResponse> {
   const session = await getServerSession(authOptions);
@@ -37,6 +41,7 @@ async function proxy(req: NextRequest, path: string[]): Promise<NextResponse> {
     headers: {
       'Content-Type': 'application/json',
       'x-internal-api-key': internalApiKey,
+      'x-user-id': session.user.id,
     },
     body: body || undefined,
     cache: 'no-store',

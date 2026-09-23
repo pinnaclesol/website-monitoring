@@ -33,6 +33,9 @@ export type { ModalProps } from './components/ui/Modal';
 export { EmptyState } from './components/ui/EmptyState';
 export type { EmptyStateProps } from './components/ui/EmptyState';
 
+export { ImageUpload } from './components/ui/ImageUpload';
+export type { ImageUploadProps } from './components/ui/ImageUpload';
+
 export {
   Select,
   SelectGroup,
@@ -41,6 +44,8 @@ export {
   SelectContent,
   SelectItem,
 } from './components/ui/Select';
+
+export { Tabs, TabsList, TabsTrigger, TabsContent } from './components/ui/Tabs';
 
 export {
   Dropdown,

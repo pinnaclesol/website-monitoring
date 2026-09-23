@@ -24,17 +24,37 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Single admin user. No sign-up route — seeded via `npm run uptime:seed`.
-/// No roles/permissions: this app deliberately has no RBAC.
+/// No sign-up route — the first user is seeded via `npm run uptime:seed`,
+/// further users are created from the `/users` view. Fixed 3-role RBAC
+/// (ADMIN/EDITOR/VIEWER) — see `@uptime/auth`'s `hasPermission`. `role:
+/// ADMIN` is an implicit super-admin for *permissions* (bypasses every
+/// `hasPermission` check). `isProtected` is a separate, narrower concept: it
+/// marks the one bootstrap account (always the env-seeded user) as
+/// immutable through the Users CRUD API entirely — not editable or
+/// deletable by anyone, including itself — so there's always a guaranteed
+/// way back in via the seed script even if every other admin is
+/// locked/removed.
 model User {
-  id        String   @id @default(cuid())
-  username  String   @unique
-  password  String // bcrypt hash — never log or return in API responses
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  username    String   @unique // login handle — not shown in the UI beyond the Users list
+  name        String? // display name shown in the sidebar/UI; falls back to username if unset
+  password    String // bcrypt hash — never log or return in API responses
+  role        Role     @default(VIEWER)
+  isProtected Boolean  @default(false)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@map("User")
+}
+
+/// Fixed set of roles driving `@uptime/auth`'s `hasPermission`. ADMIN is an
+/// implicit super-admin (bypasses per-permission checks); EDITOR/VIEWER are
+/// checked against an explicit permission table.
+enum Role {
+  ADMIN
+  EDITOR
+  VIEWER
 }
 
 /// A monitored URL/domain — the core entity of the app. Soft-deleted via
@@ -169,17 +189,21 @@ model AlertSettings {
   @@map("AlertSettings")
 }
 
-/// Singleton row: dashboard branding (site name, favicon/logo). Same
-/// app-enforced-singleton pattern as AlertSettings — no DB-level singleton
-/// constraint, the app only ever upserts one row. Named `BrandingSettings`
-/// (not the more generic `AppSettings`) to say exactly what it configures,
-/// and matches its own API route (`/settings/branding`).
+/// Singleton row: dashboard branding. Same app-enforced-singleton pattern as
+/// AlertSettings — no DB-level singleton constraint, the app only ever
+/// upserts one row. Named `BrandingSettings` (not the more generic
+/// `AppSettings`) to say exactly what it configures, and matches its own API
+/// route (`/settings/branding`). Two independent pairs: `appName`/
+/// `appLogoUrl` (in-app branding — sidebar) and `siteTitle`/`faviconUrl`
+/// (browser-facing — tab title/icon). Both image fields hold a
+/// `/uploads/<file>` path written by apps/web's local upload route, not a
+/// pasted external URL.
 model BrandingSettings {
-  id       String @id @default(cuid())
-  siteName String @default("Uptime Monitor")
-  /// URL to an image used as both the sidebar logo mark and the browser
-  /// favicon — one asset for both rather than separate upload plumbing.
-  faviconUrl String?
+  id         String   @id @default(cuid())
+  appName    String   @default("Uptime Monitor") // sidebar product name
+  appLogoUrl String? // sidebar logo mark
+  siteTitle  String   @default("Uptime Monitor") // browser tab <title>
+  faviconUrl String? // browser tab icon
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

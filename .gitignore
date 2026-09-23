@@ -48,5 +48,9 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 
+# apps/web: runtime-uploaded branding images (see app/api/upload/route.ts) —
+# local disk state on the apps/web VPS, not repo content.
+apps/web/public/uploads/
+
 # misc
 *.local

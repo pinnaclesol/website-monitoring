@@ -1,10 +1,13 @@
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import type { Role } from '@uptime/auth';
 
 /** Shape returned by apps/api's `POST /api/auth/validate` on success. */
 interface ValidateResponse {
   id: string;
   username: string;
+  name: string | null;
+  role: Role;
 }
 
 /**
@@ -43,7 +46,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         const user: ValidateResponse = await res.json();
-        return { id: user.id, username: user.username };
+        return { id: user.id, username: user.username, name: user.name, role: user.role };
       },
     }),
   ],
@@ -52,6 +55,8 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.id = user.id;
         token.username = user.username;
+        token.name = user.name;
+        token.role = user.role;
       }
       return token;
     },
@@ -59,6 +64,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         session.user.id = token.id;
         session.user.username = token.username;
+        session.user.name = token.name;
+        session.user.role = token.role;
       }
       return session;
     },

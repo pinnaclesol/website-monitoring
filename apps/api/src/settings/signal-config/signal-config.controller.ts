@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Put, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { SignalConfigService } from './signal-config.service';
 import { UpsertSignalConfigDto } from './dto/upsert-signal-config.dto';
 
@@ -20,12 +21,14 @@ export class SignalConfigController {
    * JSON matching the `SignalConfig | null` contract.
    */
   @Get()
+  @RequirePermission('notifications:view')
   async findCurrent(@Res() res: Response): Promise<void> {
     const config = await this.service.findCurrent();
     res.status(200).json(config);
   }
 
   @Put()
+  @RequirePermission('notifications:update')
   upsert(@Body() dto: UpsertSignalConfigDto) {
     return this.service.upsert(dto);
   }
