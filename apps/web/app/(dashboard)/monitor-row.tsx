@@ -50,17 +50,27 @@ function DotsIcon() {
   );
 }
 
+function EditIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+      <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+
 export function MonitorRow({
   monitor,
   canUpdate,
   canDelete,
   onChanged,
+  onEditRequested,
   onDeleteRequested,
 }: {
   monitor: MonitorWithStatus;
   canUpdate: boolean;
   canDelete: boolean;
   onChanged: () => void;
+  onEditRequested: (monitor: MonitorWithStatus) => void;
   onDeleteRequested: (monitor: MonitorWithStatus) => void;
 }) {
   const toast = useToast();
@@ -151,6 +161,12 @@ export function MonitorRow({
               <DropdownItem onClick={() => window.open(`https://${monitor.domain}`, '_blank', 'noopener')}>
                 Open site
               </DropdownItem>
+              {canUpdate ? (
+                <DropdownItem onClick={() => onEditRequested(monitor)}>
+                  <EditIcon />
+                  Edit
+                </DropdownItem>
+              ) : null}
               {canDelete ? (
                 <>
                   <DropdownSeparator />

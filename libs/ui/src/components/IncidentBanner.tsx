@@ -8,8 +8,8 @@ export interface IncidentBannerProps extends React.HTMLAttributes<HTMLDivElement
 function WarningIcon() {
   return (
     <svg
-      width="16"
-      height="16"
+      width="15"
+      height="15"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -27,7 +27,9 @@ function WarningIcon() {
 /**
  * Renders nothing when `children` is falsy/empty — pass the active-incident
  * summary text as children only when there's something to show; there's no
- * separate visibility boolean to avoid the two staying out of sync.
+ * separate visibility boolean to avoid the two staying out of sync. Owns its
+ * own icon (a colored chip, matching StatCard's icon-chip pattern) — callers
+ * should pass only the message content, not a second icon.
  */
 function IncidentBanner({ children, className, ...props }: IncidentBannerProps) {
   if (!children) return null;
@@ -35,13 +37,18 @@ function IncidentBanner({ children, className, ...props }: IncidentBannerProps) 
     <div
       role="alert"
       className={cn(
-        'mb-4 flex items-center gap-2.5 rounded border border-red-border bg-red-bg px-4 py-2.5 text-[13px] font-medium text-red',
+        'mb-5 flex items-start gap-3 rounded-lg border border-red-border bg-red-bg px-4 py-3 shadow-sm',
         className
       )}
       {...props}
     >
-      <WarningIcon />
-      <span>{children}</span>
+      <span
+        aria-hidden="true"
+        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-red/15 text-red"
+      >
+        <WarningIcon />
+      </span>
+      <div className="min-w-0 flex-1 pt-0.5 text-[13px] leading-snug text-red">{children}</div>
     </div>
   );
 }

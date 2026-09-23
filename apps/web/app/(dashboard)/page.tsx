@@ -27,7 +27,7 @@ import { apiFetch } from '../../lib/api-client';
 import { monitorStatus, type MonitorWithStatus } from '../../lib/types';
 import { stripProtocol } from '../../lib/format';
 import { MonitorRow } from './monitor-row';
-import { AddMonitorModal } from './add-monitor-modal';
+import { MonitorModal } from './monitor-modal';
 import { useSiteName } from './site-name-context';
 
 const POLL_INTERVAL_MS = 8000;
@@ -55,12 +55,11 @@ function BareIcon({ d }: { d: string }) {
     </svg>
   );
 }
-function AlertCircleIcon() {
+function ArrowRightIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" />
-      <line x1="12" y1="16" x2="12.01" y2="16" />
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+      <line x1="5" y1="12" x2="19" y2="12" />
+      <polyline points="12 5 19 12 12 19" />
     </svg>
   );
 }
@@ -92,6 +91,7 @@ export default function DashboardPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [addOpen, setAddOpen] = useState(false);
+  const [editingMonitor, setEditingMonitor] = useState<MonitorWithStatus | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MonitorWithStatus | null>(null);
   const toast = useToast();
 
@@ -206,16 +206,23 @@ export default function DashboardPage() {
       <div className="flex-1 p-6">
         <IncidentBanner>
           {downMonitors.length > 0 ? (
-            <>
-              <AlertCircleIcon />
-              <span>
-                {downMonitors.length} monitor{downMonitors.length > 1 ? 's are' : ' is'} currently down — see the{' '}
-                <a href="/incidents" className="underline">
-                  Incidents
-                </a>{' '}
-                page for details
-              </span>
-            </>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+              <div>
+                <span className="font-semibold">
+                  {downMonitors.length} monitor{downMonitors.length > 1 ? 's are' : ' is'} currently down.
+                </span>{' '}
+                <span className="text-red/85">
+                  {downMonitors.length > 1 ? 'They are' : 'It is'} not responding to health checks.
+                </span>
+              </div>
+              <a
+                href="/incidents"
+                className="inline-flex shrink-0 items-center gap-1 text-[12.5px] font-semibold text-red hover:underline"
+              >
+                View incidents
+                <ArrowRightIcon />
+              </a>
+            </div>
           ) : null}
         </IncidentBanner>
 
@@ -329,6 +336,7 @@ export default function DashboardPage() {
                       canUpdate={canUpdate}
                       canDelete={canDelete}
                       onChanged={load}
+                      onEditRequested={setEditingMonitor}
                       onDeleteRequested={setDeleteTarget}
                     />
                   ))}
@@ -339,7 +347,18 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {canCreate ? <AddMonitorModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={load} /> : null}
+      {canCreate || canUpdate ? (
+        <MonitorModal
+          open={addOpen || editingMonitor !== null}
+          onClose={() => {
+            setAddOpen(false);
+            setEditingMonitor(null);
+          }}
+          onSaved={load}
+          editingMonitor={editingMonitor}
+          monitors={monitors ?? []}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={deleteTarget !== null}

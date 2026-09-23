@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { UptimePrismaService } from '@uptime/uptime-db';
 import { createMonitorChecksQueue } from '@uptime/queue';
 import { CreateMonitorDto } from './dto/create-monitor.dto';
@@ -7,6 +7,11 @@ import { UpdateMonitorDto } from './dto/update-monitor.dto';
 const MONITOR_CHECK_INTERVAL_MS = 60_000;
 const MONITOR_CHECK_JITTER_MS = 10_000;
 const MONITOR_CHECK_JOB_NAME = 'monitor-check';
+
+// Requires at least two dot-separated labels (blocks bare garbage like
+// "asdf") — mirrors the same check apps/web's monitor modal runs client-side
+// for instant feedback; this is the real, never-trust-the-client boundary.
+const HOSTNAME_REGEX = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
 
 /** Stable per-monitor jobId so repeated create/resume calls re-use (rather than duplicate) the repeatable schedule. */
 function monitorCheckJobId(monitorId: string): string {
@@ -155,8 +160,12 @@ export class MonitorsService {
   }
 
   async create(dto: CreateMonitorDto) {
+    const domain = this.normalizeDomain(dto.domain);
+    this.assertValidDomain(domain);
+    await this.assertDomainNotTaken(domain);
+
     const monitor = await this.prisma.monitor.create({
-      data: { domain: dto.domain, label: dto.label },
+      data: { domain, label: dto.label },
     });
     await this.registerRepeatableCheck(monitor.id, monitor.domain);
     return monitor;
@@ -164,9 +173,17 @@ export class MonitorsService {
 
   async update(id: string, dto: UpdateMonitorDto) {
     const existing = await this.findOne(id);
+
+    let domain: string | undefined;
+    if (dto.domain !== undefined) {
+      domain = this.normalizeDomain(dto.domain);
+      this.assertValidDomain(domain);
+      await this.assertDomainNotTaken(domain, id);
+    }
+
     const updated = await this.prisma.monitor.update({
       where: { id },
-      data: { domain: dto.domain, label: dto.label },
+      data: { domain, label: dto.label },
     });
 
     // The repeatable job's data (the domain it actually checks) is fixed at
@@ -174,11 +191,42 @@ export class MonitorsService {
     // apps/worker doesn't keep checking the old one. Stable jobId means this
     // updates the existing schedule rather than duplicating it. Skip this
     // for a paused monitor — it has no active schedule to refresh.
-    if (dto.domain && dto.domain !== existing.domain && !existing.isPaused) {
+    if (domain && domain !== existing.domain && !existing.isPaused) {
       await this.registerRepeatableCheck(updated.id, updated.domain);
     }
 
     return updated;
+  }
+
+  /** Strips a pasted protocol/trailing slashes — never trust the client already did this. */
+  private normalizeDomain(input: string): string {
+    return input.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  }
+
+  private assertValidDomain(domain: string): void {
+    let hostname: string;
+    try {
+      hostname = new URL(`https://${domain}`).hostname;
+    } catch {
+      throw new BadRequestException('Enter a valid URL, e.g. example.com');
+    }
+    if (!HOSTNAME_REGEX.test(hostname)) {
+      throw new BadRequestException('Enter a valid URL, e.g. example.com');
+    }
+  }
+
+  /** Case-insensitive — "Example.com" and "example.com" are the same monitor. `excludeId` lets an edit keep its own domain. */
+  private async assertDomainNotTaken(domain: string, excludeId?: string): Promise<void> {
+    const existing = await this.prisma.monitor.findFirst({
+      where: {
+        deletedAt: null,
+        domain: { equals: domain, mode: 'insensitive' },
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+    if (existing) {
+      throw new ConflictException('A monitor for this URL already exists');
+    }
   }
 
   async remove(id: string): Promise<void> {

@@ -19,17 +19,29 @@
   src: local('Geist');
 }
 
+/*
+ * Modern indigo-on-slate theme (replaces the old zinc-neutral, pure
+ * black/white-accent theme — every primary button/focus-ring/link used to
+ * render as flat black-on-white or white-on-black, which read as dated).
+ * Slate (not zinc) for the neutral scale: its faint blue undertone harmonizes
+ * with the new indigo accent, the same pairing used by Linear/Vercel-style
+ * dashboards. Semantic status colors (green/red/amber) keep their existing
+ * roles but move to slightly richer shades; the old flat "blue" status token
+ * shifts to sky so it stays visually distinct from the new indigo accent
+ * (previously they were both blue-family, which read as informational-vs-
+ * primary; sky/indigo is a common paired convention for that reason).
+ */
 :root {
   --bg: #ffffff;
-  --bg-secondary: #f9f9f9;
-  --bg-muted: #f4f4f5;
-  --border: #e4e4e7;
-  --border-strong: #d4d4d8;
-  --text: #09090b;
-  --text-muted: #71717a;
-  --text-subtle: #a1a1aa;
-  --accent: #18181b;
-  --accent-fg: #fafafa;
+  --bg-secondary: #f8fafc;
+  --bg-muted: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-subtle: #94a3b8;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
   --green: #16a34a;
   --green-bg: #f0fdf4;
   --green-border: #bbf7d0;
@@ -41,12 +53,12 @@
      "white": dark mode's --red is a light pastel red, where white text
      would have poor contrast, so it flips to a near-black red instead. */
   --red-fg: #fef2f2;
-  --yellow: #ca8a04;
-  --yellow-bg: #fefce8;
-  --yellow-border: #fef08a;
-  --blue: #2563eb;
-  --blue-bg: #eff6ff;
-  --blue-border: #bfdbfe;
+  --yellow: #d97706;
+  --yellow-bg: #fffbeb;
+  --yellow-border: #fde68a;
+  --blue: #0284c7;
+  --blue-bg: #f0f9ff;
+  --blue-border: #bae6fd;
   --radius: 8px;
   --radius-sm: 6px;
   --radius-lg: 12px;
@@ -62,17 +74,21 @@
 }
 
 :root[data-theme='dark'] {
-  --bg: #09090b;
-  --bg-secondary: #111113;
-  --bg-muted: #18181b;
-  --border: #27272a;
-  --border-strong: #3f3f46;
-  --text: #fafafa;
-  --text-muted: #a1a1aa;
-  --text-subtle: #71717a;
-  --accent: #fafafa;
-  --accent-fg: #09090b;
-  --green: #22c55e;
+  --bg: #020617;
+  --bg-secondary: #0b1220;
+  --bg-muted: #1e293b;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  /* Brighter/lighter than light mode's accent (same technique as the status
+     colors below) so it stays legible and vivid against a near-black
+     background; --accent-fg flips to a dark slate instead of white since
+     indigo-400 is light enough that dark text gives better contrast. */
+  --accent: #818cf8;
+  --accent-fg: #0f172a;
+  --green: #4ade80;
   --green-bg: #052e16;
   --green-border: #14532d;
   --red: #f87171;
@@ -82,9 +98,9 @@
   --yellow: #fbbf24;
   --yellow-bg: #422006;
   --yellow-border: #713f12;
-  --blue: #60a5fa;
-  --blue-bg: #172554;
-  --blue-border: #1e3a5f;
+  --blue: #38bdf8;
+  --blue-bg: #082f49;
+  --blue-border: #075985;
 }
 
 /*

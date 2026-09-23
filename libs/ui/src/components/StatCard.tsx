@@ -9,7 +9,7 @@ export interface StatCardProps extends React.HTMLAttributes<HTMLDivElement> {
   label: React.ReactNode;
   value: React.ReactNode;
   sub?: React.ReactNode;
-  /** Drives both the icon chip's color and the value's text color — one knob, not two, so they never disagree. */
+  /** Drives the icon chip's color, the value's text color, and the corner glow — one knob, not three, so they never disagree. */
   accent?: StatCardAccent;
 }
 
@@ -29,40 +29,58 @@ const valueClasses: Record<StatCardAccent, string> = {
   yellow: 'text-yellow',
 };
 
+/** A soft, oversized color wash in the corner — the same accent as the chip/value, at low opacity — is what gives the card depth instead of a flat white rectangle. */
+const glowClasses: Record<StatCardAccent, string> = {
+  default: 'bg-text-subtle/10',
+  blue: 'bg-blue/15',
+  green: 'bg-green/15',
+  red: 'bg-red/15',
+  yellow: 'bg-yellow/15',
+};
+
 /**
  * A colored icon chip (not a bare gray glyph) is what makes a stat card read
  * as designed rather than a plain data label — one visual anchor per card,
- * driven by the same `accent` that colors the value, so a "Down" card in
- * red reads as a unit instead of a gray icon next to an unrelated red number.
+ * driven by the same `accent` that colors the value and the corner glow, so
+ * a "Down" card in red reads as a unit instead of unrelated colored pieces.
  */
 function StatCard({ icon, label, value, sub, accent = 'default', className, ...props }: StatCardProps) {
   return (
     <div
       className={cn(
-        'group rounded-lg border border-border bg-bg p-4 shadow-sm transition-all duration-150',
+        'group relative overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-sm transition-all duration-150',
         'hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md',
         className
       )}
       {...props}
     >
-      <div className="mb-3 flex items-center gap-2.5">
+      <div
+        aria-hidden="true"
+        className={cn(
+          'pointer-events-none absolute -right-5 -top-5 size-24 rounded-full blur-2xl transition-opacity duration-150 group-hover:opacity-80',
+          glowClasses[accent]
+        )}
+      />
+      <div className="relative flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[11.5px] font-medium text-text-muted">{label}</div>
+          <div className={cn('mt-1.5 text-[30px] font-semibold leading-none tracking-tight', valueClasses[accent])}>
+            {value}
+          </div>
+        </div>
         {icon ? (
           <span
             aria-hidden="true"
             className={cn(
-              'flex size-8 shrink-0 items-center justify-center rounded-md [&_svg]:size-4 [&_svg]:shrink-0',
+              'flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4 [&_svg]:shrink-0',
               chipClasses[accent]
             )}
           >
             {icon}
           </span>
         ) : null}
-        <span className="text-[11.5px] font-medium text-text-muted">{label}</span>
       </div>
-      <div className={cn('mb-0.5 text-[28px] font-semibold leading-none tracking-tight', valueClasses[accent])}>
-        {value}
-      </div>
-      {sub ? <div className="mt-1 text-[11px] text-text-subtle">{sub}</div> : null}
+      {sub ? <div className="relative mt-2.5 text-[11px] text-text-subtle">{sub}</div> : null}
     </div>
   );
 }

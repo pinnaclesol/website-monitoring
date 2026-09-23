@@ -74,7 +74,17 @@
       "Bash(taskkill //F //PID 36876)",
       "Bash(taskkill //F //PID 40016)",
       "Bash(taskkill //F //PID 36528)",
-      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/)"
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/)",
+      "Bash(grep -rEn \"#[0-9a-fA-F]{3,8}\" libs/ui/src apps/web/app --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -o \"bg-accent[^,{]*{[^}]\\\\{1,80\\\\}\" /tmp/compiled.css)",
+      "Bash(rm -f /tmp/compiled.css \"C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/compiled.css\")",
+      "Bash(taskkill //F //PID 36872)",
+      "Bash(taskkill //F //PID 36560)",
+      "Bash(taskkill //F //PID 2996)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const m=JSON.parse\\(d\\); console.log\\(m.map\\(x=>\\({domain:x.domain,label:x.label}\\)\\)\\)}\\)\")",
+      "Bash(taskkill //F //PID 43824)",
+      "Bash(taskkill //F //PID 37348)",
+      "Bash(taskkill //F //PID 29716)"
     ],
     "deny": [
       "Bash(rm -rf *)",
