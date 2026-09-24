@@ -4,7 +4,6 @@ import { createMonitorChecksQueue } from '@uptime/queue';
 import { CreateMonitorDto } from './dto/create-monitor.dto';
 import { UpdateMonitorDto } from './dto/update-monitor.dto';
 
-const MONITOR_CHECK_INTERVAL_MS = 60_000;
 const MONITOR_CHECK_JITTER_MS = 10_000;
 const MONITOR_CHECK_JOB_NAME = 'monitor-check';
 
@@ -236,6 +235,15 @@ export class MonitorsService {
       data: { deletedAt: new Date() },
     });
     await this.removeRepeatableCheck(monitor.id);
+
+    // A deleted monitor gets no more checks, so a still-open Incident could
+    // never be closed by a real recovery — it would sit as "still down"
+    // forever. Close it now; this is bookkeeping (we stopped watching), not
+    // a claim that the site actually recovered.
+    await this.prisma.incident.updateMany({
+      where: { monitorId: id, endedAt: null },
+      data: { endedAt: new Date() },
+    });
   }
 
   async pause(id: string) {
@@ -273,24 +281,53 @@ export class MonitorsService {
    * removeRepeatableByKey with the Job Scheduler API (upsertJobScheduler/
    * removeJobScheduler), and dropped the old `jitter` repeat option
    * entirely. We emulate CLAUDE.md's "jitter spreads thousands of jobs
-   * across the 60s window instead of firing them all at once" requirement
-   * by randomizing each monitor's scheduler `startDate` within one
-   * interval — every monitor still repeats every MONITOR_CHECK_INTERVAL_MS
-   * after that, just starting from a staggered offset instead of all in
-   * lockstep.
+   * across the interval window instead of firing them all at once"
+   * requirement by randomizing each monitor's scheduler `startDate` within
+   * one interval — every monitor still repeats every `intervalMs` after
+   * that, just starting from a staggered offset instead of all in lockstep.
+   *
+   * `intervalMs` is optional purely as a batching optimization for
+   * `rescheduleAllActive()`, which fetches MonitoringSettings once and
+   * passes it to every monitor instead of each one querying it separately.
    */
-  private async registerRepeatableCheck(monitorId: string, domain: string): Promise<void> {
+  private async registerRepeatableCheck(monitorId: string, domain: string, intervalMs?: number): Promise<void> {
+    const checkIntervalMs = intervalMs ?? (await this.getCheckIntervalMs());
     const jitterOffsetMs = Math.floor(Math.random() * MONITOR_CHECK_JITTER_MS);
 
     await this.monitorChecksQueue.upsertJobScheduler(
       monitorCheckJobId(monitorId),
-      { every: MONITOR_CHECK_INTERVAL_MS, startDate: Date.now() + jitterOffsetMs },
+      { every: checkIntervalMs, startDate: Date.now() + jitterOffsetMs },
       {
         name: MONITOR_CHECK_JOB_NAME,
         data: { monitorId, domain },
         opts: { attempts: 2, backoff: { type: 'fixed', delay: 5000 } },
       },
     );
+  }
+
+  /** Always read fresh from the DB (never cache/hardcode) — same discipline as apps/worker's alert-dispatch config reads. */
+  private async getCheckIntervalMs(): Promise<number> {
+    const settings = await this.prisma.monitoringSettings.findFirst({ orderBy: { createdAt: 'asc' } });
+    return (settings?.checkIntervalSeconds ?? 60) * 1000;
+  }
+
+  /**
+   * Called by MonitoringSettingsService when the global check interval
+   * changes — re-registers every active monitor's schedule with the new
+   * interval so the change takes effect immediately, not just for monitors
+   * created/resumed after the change (a paused monitor has no active
+   * schedule to refresh, so it's skipped; it'll pick up the current
+   * interval whenever it's next resumed).
+   */
+  async rescheduleAllActive(): Promise<void> {
+    const [monitors, intervalMs] = await Promise.all([
+      this.prisma.monitor.findMany({
+        where: { deletedAt: null, isPaused: false },
+        select: { id: true, domain: true },
+      }),
+      this.getCheckIntervalMs(),
+    ]);
+    await Promise.all(monitors.map((m) => this.registerRepeatableCheck(m.id, m.domain, intervalMs)));
   }
 
   private async removeRepeatableCheck(monitorId: string): Promise<void> {

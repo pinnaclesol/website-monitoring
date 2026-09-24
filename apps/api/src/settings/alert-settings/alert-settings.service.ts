@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { UptimePrismaService } from '@uptime/uptime-db';
 import { UpdateAlertSettingsDto } from './dto/update-alert-settings.dto';
 
-/** Singleton row: alert-repeat/recovery behavior shared by all notification channels. */
+/** Singleton row: recovery-alert behavior shared by all notification channels. */
 @Injectable()
 export class AlertSettingsService {
   constructor(private readonly prisma: UptimePrismaService) {}
@@ -14,7 +14,7 @@ export class AlertSettingsService {
     if (existing) {
       return existing;
     }
-    // Defaults (alertIntervalSeconds: 300, recoveryAlertEnabled: true) come from the Prisma schema.
+    // Default (recoveryAlertEnabled: true) comes from the Prisma schema.
     return this.prisma.alertSettings.create({ data: {} });
   }
 

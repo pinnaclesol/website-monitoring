@@ -119,9 +119,14 @@ model Incident {
   @@map("Incident")
 }
 
-/// One row per Monitor, drives the down -> repeat-every-N -> recovery alert
-/// dedup state machine. Mutated in place by apps/worker; no `updatedAt`
-/// since `lastAlertSentAt` already tracks the last meaningful state change.
+/// One row per Monitor, drives the down -> recovery alert dedup state
+/// machine: exactly one "down" alert per down period (`isDown` flips true
+/// the moment a down alert is sent, and stays true — no repeat/reminder
+/// alerts while still down) and exactly one "recovery" alert when it comes
+/// back up. `lastAlertSentAt` records when the down alert was sent, for
+/// reference only — nothing re-reads it to gate a repeat send. Mutated in
+/// place by apps/worker; no `updatedAt` since `lastAlertSentAt` already
+/// tracks the last meaningful state change.
 model MonitorAlertState {
   id              String    @id @default(cuid())
   monitorId       String    @unique
@@ -161,8 +166,28 @@ model SignalConfig {
   @@map("SignalConfig")
 }
 
-/// An email address that receives alert notifications, sent via one
-/// env-configured SMTP relay.
+/// The SMTP relay email alerts are sent through — single config (not
+/// multi-account, same pattern as SignalConfig), configured from the
+/// Settings view instead of env vars. `password` is a secret: never
+/// returned by the API (GET exposes only a `hasPassword` boolean); leaving
+/// the password field blank on an update keeps the existing one, same UX as
+/// editing a User's password.
+model SmtpConfig {
+  id        String   @id @default(cuid())
+  host      String
+  port      Int      @default(587)
+  username  String?
+  password  String? // secret — never logged or returned in API responses
+  fromEmail String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("SmtpConfig")
+}
+
+/// An email address that receives alert notifications, sent via the
+/// SmtpConfig relay above.
 model EmailRecipient {
   id        String   @id @default(cuid())
   email     String   @unique
@@ -173,15 +198,31 @@ model EmailRecipient {
   @@map("EmailRecipient")
 }
 
-/// Singleton row: alert-repeat/recovery behavior shared by all notification
+/// Singleton row: how often apps/worker checks each active Monitor (default
+/// 60s). Deliberately its own table, not a field on AlertSettings — this is
+/// monitoring cadence, not alert-dispatch behavior, a different concern.
+/// Changing it re-registers every active monitor's BullMQ repeatable
+/// schedule (`MonitorsService.rescheduleAllActive`) so the new interval
+/// takes effect immediately, not just for monitors created/resumed after.
+model MonitoringSettings {
+  id                   String   @id @default(cuid())
+  checkIntervalSeconds Int      @default(60)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("MonitoringSettings")
+}
+
+/// Singleton row: recovery-alert behavior shared by all notification
 /// channels (Telegram/Signal/Email). Modeled as a normal table — the app is
 /// responsible for ever only upserting a single row; no DB-level singleton
 /// enforcement (e.g. a fixed/hardcoded id) is required. Named `AlertSettings`
 /// (not the more generic `NotificationSettings`) since that's precisely what
-/// it holds.
+/// it holds. No repeat-reminder interval, deliberately: exactly one alert
+/// per down period (see `MonitorAlertState`'s doc comment), not a repeating
+/// nag while a monitor stays down.
 model AlertSettings {
   id                   String   @id @default(cuid())
-  alertIntervalSeconds Int      @default(300)
   recoveryAlertEnabled Boolean  @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt

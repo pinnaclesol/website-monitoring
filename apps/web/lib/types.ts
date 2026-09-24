@@ -39,8 +39,13 @@ export interface IncidentWithMonitor {
 
 export interface AlertSettings {
   id: string;
-  alertIntervalSeconds: number;
   recoveryAlertEnabled: boolean;
+}
+
+/** How often apps/worker checks each active Monitor — mirrors apps/api's `settings/monitoring` response shape. */
+export interface MonitoringSettings {
+  id: string;
+  checkIntervalSeconds: number;
 }
 
 export interface TelegramAccount {
@@ -62,6 +67,17 @@ export interface EmailRecipient {
   id: string;
   email: string;
   isActive: boolean;
+}
+
+/** Mirrors apps/api's `settings/smtp-config` response shape — never includes the password. */
+export interface SmtpConfig {
+  id: string;
+  host: string;
+  port: number;
+  username: string | null;
+  fromEmail: string;
+  isActive: boolean;
+  hasPassword: boolean;
 }
 
 /** Mirrors apps/api's `users` resource response shape — never includes password. */

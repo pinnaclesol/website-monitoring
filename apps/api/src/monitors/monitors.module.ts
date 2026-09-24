@@ -5,5 +5,8 @@ import { MonitorsService } from './monitors.service';
 @Module({
   controllers: [MonitorsController],
   providers: [MonitorsService],
+  // SettingsModule's MonitoringSettingsService calls rescheduleAllActive()
+  // when the global check interval changes.
+  exports: [MonitorsService],
 })
 export class MonitorsModule {}

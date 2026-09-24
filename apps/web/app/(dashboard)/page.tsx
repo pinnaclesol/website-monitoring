@@ -24,13 +24,13 @@ import {
   useToast,
 } from '@uptime/ui';
 import { apiFetch } from '../../lib/api-client';
-import { monitorStatus, type MonitorWithStatus } from '../../lib/types';
+import { monitorStatus, type MonitorWithStatus, type MonitoringSettings } from '../../lib/types';
 import { stripProtocol } from '../../lib/format';
 import { MonitorRow } from './monitor-row';
 import { MonitorModal } from './monitor-modal';
 import { useSiteName } from './site-name-context';
 
-const POLL_INTERVAL_MS = 8000;
+const POLL_INTERVAL_MS = 15000;
 
 function SearchIcon() {
   return (
@@ -96,7 +96,19 @@ export default function DashboardPage() {
   const toast = useToast();
 
   const [secondsToRefresh, setSecondsToRefresh] = useState(POLL_INTERVAL_MS / 1000);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [checkingAll, setCheckingAll] = useState(false);
+  const [checkIntervalSeconds, setCheckIntervalSeconds] = useState(60);
+
+  useEffect(() => {
+    // Fetched once, not on the monitors poll — this rarely changes and
+    // isn't part of the live status data.
+    apiFetch<MonitoringSettings>('settings/monitoring')
+      .then((settings) => setCheckIntervalSeconds(settings.checkIntervalSeconds))
+      .catch(() => {
+        // Falls back to the 60s default already in state — not worth a toast.
+      });
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -111,19 +123,35 @@ export default function DashboardPage() {
 
   useEffect(() => {
     load();
-    const refreshInterval = setInterval(load, POLL_INTERVAL_MS);
-    // A real countdown to the dashboard's own next auto-refresh — not a
-    // per-monitor "next check" time, which apps/worker staggers
-    // independently per monitor (jitter) and the dashboard has no way to
-    // know precisely.
+    // A single 1s tick both drives the visible countdown and triggers the
+    // actual re-fetch once it reaches zero — not two independent timers
+    // (a fetch interval plus a separate display countdown), so a manual
+    // refresh (which resets secondsToRefresh via load()'s own finally) stays
+    // in sync with when the next real auto-fetch actually happens, instead
+    // of a stale second timer firing on its own unrelated schedule. This is
+    // the dashboard's own poll countdown — not a per-monitor "next check"
+    // time, which apps/worker staggers independently per monitor (jitter)
+    // and the dashboard has no way to know precisely.
     const tickInterval = setInterval(() => {
-      setSecondsToRefresh((s) => (s <= 1 ? POLL_INTERVAL_MS / 1000 : s - 1));
+      setSecondsToRefresh((s) => {
+        if (s <= 1) {
+          load();
+          return POLL_INTERVAL_MS / 1000;
+        }
+        return s - 1;
+      });
     }, 1000);
-    return () => {
-      clearInterval(refreshInterval);
-      clearInterval(tickInterval);
-    };
+    return () => clearInterval(tickInterval);
   }, [load]);
+
+  async function manualRefresh() {
+    setManualRefreshing(true);
+    try {
+      await load();
+    } finally {
+      setManualRefreshing(false);
+    }
+  }
 
   async function checkAll() {
     const targets = (monitors ?? []).filter((m) => !m.isPaused);
@@ -192,12 +220,12 @@ export default function DashboardPage() {
               </span>
               Refreshing in <span className="font-mono font-medium text-text-muted">{secondsToRefresh}s</span>
             </span>
-            {canUpdate ? (
-              <Button variant="outline" size="sm" onClick={checkAll} disabled={checkingAll}>
+            <Button variant="outline" size="sm" onClick={manualRefresh} disabled={manualRefreshing}>
+              <span className={manualRefreshing ? 'animate-spin' : undefined}>
                 <RefreshIcon />
-                {checkingAll ? 'Queuing…' : 'Check all'}
-              </Button>
-            ) : null}
+              </span>
+              {manualRefreshing ? 'Refreshing…' : 'Refresh'}
+            </Button>
           </>
         }
       >
@@ -262,7 +290,7 @@ export default function DashboardPage() {
             <div>
               <CardTitle>Monitors</CardTitle>
               <CardDescription>
-                Checked every 60s — last 30 checks shown as bars, 100 stored per monitor
+                Checked every {checkIntervalSeconds}s — last 30 checks shown as bars, 100 stored per monitor
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -296,6 +324,15 @@ export default function DashboardPage() {
               ) : null}
             </div>
           </CardHeader>
+
+          {canUpdate ? (
+            <div className="flex items-center justify-end border-t border-border px-5 py-2.5">
+              <Button variant="outline" size="sm" onClick={checkAll} disabled={checkingAll}>
+                <RefreshIcon />
+                {checkingAll ? 'Queuing…' : 'Check all'}
+              </Button>
+            </div>
+          ) : null}
 
           {monitors === null ? (
             <div className="px-6 py-11 text-center text-sm text-text-muted">Loading…</div>

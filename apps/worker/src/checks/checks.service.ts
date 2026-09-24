@@ -130,19 +130,24 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * The down -> repeat-every-N -> recovery state machine. See
-   * .claude/agents/worker-agent.md's "Alert-state machine" section — these
-   * are hard invariants, not guidelines:
+   * The down -> recovery state machine. See .claude/agents/worker-agent.md's
+   * "Alert-state machine" section — these are hard invariants, not
+   * guidelines:
    *   - up -> confirmed-down: open exactly one new Incident, set
    *     MonitorAlertState.isDown = true, lastAlertSentAt = now, enqueue a
    *     `down` alert-dispatch job.
-   *   - still down, interval elapsed: enqueue a `reminder` alert-dispatch
-   *     job, bump lastAlertSentAt. Never before the interval elapses.
+   *   - still down: do nothing. Exactly one alert per down period — no
+   *     repeat/reminder while it stays down, deliberately (a repeating nag
+   *     was the previous behavior; removed because it's not what anyone
+   *     wants from an uptime monitor).
    *   - down -> recovered: close the open Incident, enqueue a `recovery`
    *     alert-dispatch job (with downtimeMs) only if recoveryAlertEnabled,
    *     clear MonitorAlertState.isDown.
    *   - Never open a second Incident for an already-down monitor; never
-   *     leave an Incident open after a recovered check.
+   *     leave an Incident open after a recovered check. A fresh down period
+   *     after a recovery naturally gets its own single `down` alert again
+   *     (isDown was reset to false, so the up -> confirmed-down branch
+   *     re-fires next time it goes down).
    *
    * Known limitation: this isn't wrapped in a DB transaction/lock. A single
    * monitor only ever has one repeatable job, so under normal operation
@@ -176,21 +181,8 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!isUp && wasDown) {
-      // still down — reminder, gated by AlertSettings.alertIntervalSeconds
-      const settings = await this.prisma.alertSettings.findFirst({
-        orderBy: { createdAt: 'asc' },
-      });
-      const intervalMs = (settings?.alertIntervalSeconds ?? 300) * 1000;
-      const lastSent = existingState?.lastAlertSentAt;
-      const dueForReminder = !lastSent || now.getTime() - lastSent.getTime() >= intervalMs;
-
-      if (dueForReminder) {
-        await this.prisma.monitorAlertState.update({
-          where: { monitorId },
-          data: { lastAlertSentAt: now },
-        });
-        await this.enqueueAlert(monitorId, 'reminder', now);
-      }
+      // Still down — already alerted once for this down period, and stays
+      // that way (isDown remains true) until it recovers. No repeat send.
       return;
     }
 

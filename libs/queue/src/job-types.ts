@@ -4,7 +4,10 @@ export interface MonitorCheckJobData {
   domain: string;
 }
 
-export type AlertEvent = 'down' | 'reminder' | 'recovery';
+// No 'reminder' — exactly one alert per down period (see
+// apps/worker/src/checks/checks.service.ts's runAlertStateMachine), never a
+// repeating nag while still down.
+export type AlertEvent = 'down' | 'recovery';
 
 /** Payload for an `alert-dispatch` job — one job per alert event, enqueued by apps/worker. */
 export interface AlertDispatchJobData {
