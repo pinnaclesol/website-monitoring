@@ -15,8 +15,14 @@
 // each one is for without cross-referencing this file.
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../src/generated"
+  provider      = "prisma-client-js"
+  output        = "../src/generated"
+  // "native" keeps this dev machine's own engine (Windows); the Debian
+  // target is what apps/api/apps/worker's Docker images need at runtime
+  // (see Dockerfile.api/Dockerfile.worker) — Prisma can only produce the
+  // Linux binary by running `prisma generate` inside a Linux environment,
+  // so this alone doesn't put it on a Windows dev machine's disk.
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {

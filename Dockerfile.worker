@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS deps
+WORKDIR /app
+
+# See Dockerfile.api's identical step for why this is needed.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+
+# apps/worker also queries Postgres directly (writes MonitorCheck/Incident
+# rows) — same Linux Prisma engine generation as Dockerfile.api, and the
+# schema must be present before `npm ci` for the same postinstall-hook
+# reason (see Dockerfile.api). Does NOT run migrations itself (apps/api is
+# the single source of truth for schema state — see Dockerfile.api's
+# dev/production CMDs).
+COPY libs/uptime-db/prisma libs/uptime-db/prisma
+
+RUN npm ci
+
+
+FROM deps AS dev
+# No source COPY — bind-mounted at container-run time, same node_modules
+# anonymous-volume handling as Dockerfile.api (see docker-compose.dev.yml).
+# `nx serve worker` mirrors what `npm run serve:worker` already runs today.
+CMD ["npx", "nx", "serve", "worker"]
+
+
+FROM deps AS build
+COPY . .
+# Must be `nx build worker`, not apps/worker/package.json's own "build":
+# "nest build" script — same @uptime/* webpack-externals-override reasoning
+# as Dockerfile.api. Output lands at dist/apps/worker/main.js.
+RUN npx nx build worker
+
+
+FROM node:24-bookworm-slim AS production
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+# --ignore-scripts: same reasoning as Dockerfile.api's production stage —
+# the built Prisma client is copied straight from the `build` stage below.
+RUN npm ci --omit=dev --ignore-scripts
+
+COPY --from=build /app/dist/apps/worker ./dist/apps/worker
+COPY --from=build /app/libs/uptime-db/prisma ./libs/uptime-db/prisma
+COPY --from=build /app/libs/uptime-db/src/generated ./libs/uptime-db/src/generated
+
+# 4002 also serves Bull Board at /admin/queues (Basic Auth via
+# BULL_BOARD_USER/PASS — see apps/worker/src/main.ts).
+EXPOSE 4002
+CMD ["node", "dist/apps/worker/main.js"]

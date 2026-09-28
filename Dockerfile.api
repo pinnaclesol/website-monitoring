@@ -1,0 +1,94 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS deps
+WORKDIR /app
+
+# The Prisma engine needs OpenSSL to correctly detect which variant to load
+# at runtime — without it, `prisma generate`/the query engine falls back to
+# guessing (seen as a "failed to detect libssl" warning) and can pick the
+# wrong one even though `binaryTargets` below asks for a specific target.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Every workspace's package.json, individually — npm needs all of them
+# present to resolve the workspace graph, even before `npm ci` runs. Copied
+# before the rest of the source so this layer only invalidates when a
+# dependency actually changes, not on every source edit.
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+
+# The schema must be present *before* `npm ci` — the root package.json's
+# `postinstall` script (`npm run uptime:generate` → `prisma generate`) fires
+# automatically as part of `npm ci` and fails without it. This one `npm ci`
+# run is also what puts the Linux Prisma engine binary on disk (the schema's
+# binaryTargets now requests it) — generating on a Windows host only
+# produces the Windows engine, so this has to happen inside this Linux
+# build environment, not be copied in from the host.
+COPY libs/uptime-db/prisma libs/uptime-db/prisma
+
+RUN npm ci
+
+
+FROM deps AS dev
+# No source COPY — docker-compose.dev.yml bind-mounts the whole repo over
+# /app at container-run time, with an anonymous volume on node_modules so
+# this stage's own Linux-built node_modules (and the Linux Prisma engine
+# just generated above) aren't overwritten by the host's Windows ones.
+#
+# `nx serve api` is the same command `npm run serve:api` already runs today
+# — Nx's own dev-mode watcher, which goes through apps/api/webpack.config.js
+# (the @uptime/* bundling override every build here depends on), not Nest's
+# own `nest start --watch` (a separate, unused script left over in
+# apps/api/package.json — see that file's build/dev scripts vs. what Nx
+# actually runs). `migrate deploy` first is idempotent (only applies pending
+# migrations, never destructive) — safe on every container start/restart.
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=libs/uptime-db/prisma/schema.prisma && npx nx serve api"]
+
+
+FROM deps AS build
+COPY . .
+# Must be `nx build api`, not apps/api/package.json's own "build": "nest
+# build" script — the latter skips the webpack @uptime/* override and
+# leaves `require('@uptime/uptime-db')` unresolved at runtime. Output lands
+# at dist/apps/api/main.js, not apps/api/dist/main.js.
+RUN npx nx build api
+
+
+FROM node:24-bookworm-slim AS production
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Needed at runtime too, not just at `prisma generate` time — the query
+# engine binary itself links against it.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+# --ignore-scripts: the already-built Prisma client (with the correct Linux
+# engine) is copied straight from the `build` stage below — no need for
+# `npm ci`'s postinstall hook to regenerate it here too (and without this,
+# it would fail anyway: the schema file isn't copied into this fresh stage).
+RUN npm ci --omit=dev --ignore-scripts
+
+COPY --from=build /app/dist/apps/api ./dist/apps/api
+COPY --from=build /app/libs/uptime-db/prisma ./libs/uptime-db/prisma
+COPY --from=build /app/libs/uptime-db/src/generated ./libs/uptime-db/src/generated
+
+# Never published to the host in Phase 2's compose file — only reachable by
+# other containers on the same compose network (Caddy talks to `web`, not
+# `api`; see the Phase 2 plan for the full networking rationale).
+EXPOSE 4001
+CMD ["sh", "-c", "npx prisma migrate deploy --schema=libs/uptime-db/prisma/schema.prisma && node dist/apps/api/main.js"]

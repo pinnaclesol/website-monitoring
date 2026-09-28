@@ -11,6 +11,7 @@ import { IncidentsModule } from './incidents/incidents.module';
 import { SettingsModule } from './settings/settings.module';
 import { UsersModule } from './users/users.module';
 import { RolesModule } from './roles/roles.module';
+import { HealthController } from './health/health.controller';
 
 @Module({
   imports: [
@@ -25,6 +26,9 @@ import { RolesModule } from './roles/roles.module';
     UsersModule,
     RolesModule,
   ],
+  // HealthController lives directly here (not its own module) — mirrors
+  // apps/worker/src/app.module.ts's exact pattern for the same route.
+  controllers: [HealthController],
   providers: [
     {
       provide: APP_GUARD,

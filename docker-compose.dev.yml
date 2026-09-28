@@ -1,0 +1,95 @@
+# Env vars: `.env` (your existing one, unchanged) plus `.env.docker` (copy
+# from .env.docker.example — overrides DATABASE_URL/REDIS_URL to use
+# host.docker.internal instead of localhost, since "localhost" inside a
+# container means the container itself, not this machine). See
+# .env.docker.example for why.
+#
+# `web`'s API_URL is set here directly (not in an env file) — it's
+# Docker-topology-specific (the compose service name `api`, resolved via
+# Docker's built-in DNS), not a secret.
+
+# Two more anonymous volumes on every service, same "bind mount would
+# overlay a Linux-built directory with the Windows host's copy" problem as
+# node_modules:
+#   /app/.nx                       — Nx's own cache/daemon state. Sharing it
+#                                     across three simultaneously-running
+#                                     `nx` processes (one per container) via
+#                                     the bind mount causes false-positive
+#                                     "recursive task invocation" errors —
+#                                     each container needs its own isolated
+#                                     copy, not the host's (or each other's).
+#   /app/libs/uptime-db/src/generated — the *Linux* Prisma engine binary
+#                                     baked in at image build time; `web`
+#                                     never imports @uptime/uptime-db, so it
+#                                     doesn't need this one.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: dev
+    env_file:
+      - .env
+      - .env.docker
+    environment:
+      # Each container runs its own `nx serve`/`nx dev`/`nx build` — without
+      # this, all three would try to coordinate through the SAME Nx daemon
+      # state (bind-mounted in via `.nx/`, shared across containers) and
+      # produce false-positive "recursive task invocation" errors, since Nx
+      # sees another container's in-progress task and mistakes it for a
+      # cycle in its own chain. Disabling the daemon makes each `nx` call
+      # fully standalone — the documented fix for exactly this scenario.
+      NX_DAEMON: 'false'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '4001:4001'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.nx
+      - /app/libs/uptime-db/src/generated
+    init: true
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: dev
+    env_file:
+      - .env
+      - .env.docker
+    environment:
+      API_URL: http://api:4001
+      NX_DAEMON: 'false'
+    depends_on:
+      - api
+    ports:
+      - '4000:4000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.nx
+    init: true
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+      target: dev
+    env_file:
+      - .env
+      - .env.docker
+    environment:
+      NX_DAEMON: 'false'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    ports:
+      - '4002:4002'
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.nx
+      - /app/libs/uptime-db/src/generated
+    init: true
