@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { Topbar, Breadcrumb, Card, CardHeader, CardTitle, CardDescription, Button, EmptyState, ConfirmDialog, useToast } from '@uptime/ui';
+import { hasPermission } from '@uptime/auth';
 import { apiFetch } from '../../../lib/api-client';
 import type { RoleRecord } from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
@@ -28,6 +30,11 @@ function RolesEmptyIcon() {
 export default function RolesPage() {
   const siteName = useSiteName();
   const toast = useToast();
+  const { data: session } = useSession();
+  const permissions = session?.user.permissions;
+  const canCreate = !!permissions && hasPermission(permissions, 'roles:create');
+  const canUpdate = !!permissions && hasPermission(permissions, 'roles:update');
+  const canDelete = !!permissions && hasPermission(permissions, 'roles:delete');
 
   const [roles, setRoles] = useState<RoleRecord[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -71,15 +78,17 @@ export default function RolesPage() {
               <CardTitle>Roles</CardTitle>
               <CardDescription>Define named permission sets and assign them to users</CardDescription>
             </div>
-            <Button
-              onClick={() => {
-                setEditingRole(null);
-                setModalOpen(true);
-              }}
-            >
-              <PlusIcon />
-              Add role
-            </Button>
+            {canCreate ? (
+              <Button
+                onClick={() => {
+                  setEditingRole(null);
+                  setModalOpen(true);
+                }}
+              >
+                <PlusIcon />
+                Add role
+              </Button>
+            ) : null}
           </CardHeader>
 
           {roles === null ? (
@@ -103,6 +112,8 @@ export default function RolesPage() {
                     <RoleRow
                       key={role.id}
                       role={role}
+                      canUpdate={canUpdate}
+                      canDelete={canDelete}
                       onEditRequested={(r) => {
                         setEditingRole(r);
                         setModalOpen(true);

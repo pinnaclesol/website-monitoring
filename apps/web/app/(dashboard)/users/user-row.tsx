@@ -36,11 +36,15 @@ function LockIcon() {
 
 export function UserRow({
   user,
+  canUpdate,
+  canDelete,
   onChanged,
   onEditRequested,
   onDeleteRequested,
 }: {
   user: UserRecord;
+  canUpdate: boolean;
+  canDelete: boolean;
   onChanged: () => void;
   onEditRequested: (user: UserRecord) => void;
   onDeleteRequested: (user: UserRecord) => void;
@@ -83,7 +87,7 @@ export function UserRow({
         <Toggle
           checked={user.active}
           onCheckedChange={toggleActive}
-          disabled={user.isProtected}
+          disabled={user.isProtected || !canUpdate}
           aria-label={user.active ? 'Deactivate user' : 'Activate user'}
         />
       </td>
@@ -99,16 +103,20 @@ export function UserRow({
             <LockIcon />
             Protected
           </span>
-        ) : (
+        ) : canUpdate || canDelete ? (
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" className="p-1.5" title="Edit user" onClick={() => onEditRequested(user)}>
-              <EditIcon />
-            </Button>
-            <Button variant="ghost" size="sm" className="p-1.5" title="Delete user" onClick={() => onDeleteRequested(user)}>
-              <TrashIcon />
-            </Button>
+            {canUpdate ? (
+              <Button variant="ghost" size="sm" className="p-1.5" title="Edit user" onClick={() => onEditRequested(user)}>
+                <EditIcon />
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <Button variant="ghost" size="sm" className="p-1.5" title="Delete user" onClick={() => onDeleteRequested(user)}>
+                <TrashIcon />
+              </Button>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </td>
     </tr>
   );

@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { Topbar, Breadcrumb, Card, CardHeader, CardTitle, CardDescription, Button, EmptyState, ConfirmDialog, useToast } from '@uptime/ui';
+import { hasPermission } from '@uptime/auth';
 import { apiFetch } from '../../../lib/api-client';
 import type { UserRecord } from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
@@ -29,6 +31,11 @@ function UsersEmptyIcon() {
 export default function UsersPage() {
   const siteName = useSiteName();
   const toast = useToast();
+  const { data: session } = useSession();
+  const permissions = session?.user.permissions;
+  const canCreate = !!permissions && hasPermission(permissions, 'users:create');
+  const canUpdate = !!permissions && hasPermission(permissions, 'users:update');
+  const canDelete = !!permissions && hasPermission(permissions, 'users:delete');
 
   const [users, setUsers] = useState<UserRecord[] | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -72,15 +79,17 @@ export default function UsersPage() {
               <CardTitle>Users</CardTitle>
               <CardDescription>Manage who can log in to the dashboard and what they can do</CardDescription>
             </div>
-            <Button
-              onClick={() => {
-                setEditingUser(null);
-                setModalOpen(true);
-              }}
-            >
-              <PlusIcon />
-              Add user
-            </Button>
+            {canCreate ? (
+              <Button
+                onClick={() => {
+                  setEditingUser(null);
+                  setModalOpen(true);
+                }}
+              >
+                <PlusIcon />
+                Add user
+              </Button>
+            ) : null}
           </CardHeader>
 
           {users === null ? (
@@ -105,6 +114,8 @@ export default function UsersPage() {
                     <UserRow
                       key={user.id}
                       user={user}
+                      canUpdate={canUpdate}
+                      canDelete={canDelete}
                       onChanged={load}
                       onEditRequested={(u) => {
                         setEditingUser(u);

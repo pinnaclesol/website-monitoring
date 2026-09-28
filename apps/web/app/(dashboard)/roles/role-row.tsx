@@ -29,10 +29,14 @@ function LockIcon() {
 
 export function RoleRow({
   role,
+  canUpdate,
+  canDelete,
   onEditRequested,
   onDeleteRequested,
 }: {
   role: RoleRecord;
+  canUpdate: boolean;
+  canDelete: boolean;
   onEditRequested: (role: RoleRecord) => void;
   onDeleteRequested: (role: RoleRecord) => void;
 }) {
@@ -59,16 +63,20 @@ export function RoleRow({
             <LockIcon />
             Protected
           </span>
-        ) : (
+        ) : canUpdate || canDelete ? (
           <div className="flex items-center gap-0.5">
-            <Button variant="ghost" size="sm" className="p-1.5" title="Edit role" onClick={() => onEditRequested(role)}>
-              <EditIcon />
-            </Button>
-            <Button variant="ghost" size="sm" className="p-1.5" title="Delete role" onClick={() => onDeleteRequested(role)}>
-              <TrashIcon />
-            </Button>
+            {canUpdate ? (
+              <Button variant="ghost" size="sm" className="p-1.5" title="Edit role" onClick={() => onEditRequested(role)}>
+                <EditIcon />
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <Button variant="ghost" size="sm" className="p-1.5" title="Delete role" onClick={() => onDeleteRequested(role)}>
+                <TrashIcon />
+              </Button>
+            ) : null}
           </div>
-        )}
+        ) : null}
       </td>
     </tr>
   );
