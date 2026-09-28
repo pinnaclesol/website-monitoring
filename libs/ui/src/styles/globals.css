@@ -1,0 +1,201 @@
+@import 'tailwindcss';
+
+/*
+ * Tailwind v4's automatic content detection doesn't cross into libs/ui from
+ * an app that imports this stylesheet — libs/ui is its own npm-workspace
+ * package (has its own package.json), and Tailwind's heuristic scan doesn't
+ * reach into sibling packages even when referenced by a relative path
+ * instead of through node_modules. Without this, every component in
+ * libs/ui/src renders with zero matching CSS (confirmed: a production build
+ * of apps/web contained only the Tailwind classes written directly in
+ * apps/web's own files — none from Button/Badge/Card/Input). This @source
+ * directive is what makes libs/ui self-contained regardless of which app
+ * imports it — an app itself never needs its own @source for this.
+ */
+@source '../**/*.{ts,tsx}';
+
+@font-face {
+  font-family: 'Geist';
+  src: local('Geist');
+}
+
+/*
+ * Modern indigo-on-slate theme (replaces the old zinc-neutral, pure
+ * black/white-accent theme — every primary button/focus-ring/link used to
+ * render as flat black-on-white or white-on-black, which read as dated).
+ * Slate (not zinc) for the neutral scale: its faint blue undertone harmonizes
+ * with the new indigo accent, the same pairing used by Linear/Vercel-style
+ * dashboards. Semantic status colors (green/red/amber) keep their existing
+ * roles but move to slightly richer shades; the old flat "blue" status token
+ * shifts to sky so it stays visually distinct from the new indigo accent
+ * (previously they were both blue-family, which read as informational-vs-
+ * primary; sky/indigo is a common paired convention for that reason).
+ */
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-muted: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-subtle: #94a3b8;
+  --accent: #4f46e5;
+  --accent-fg: #ffffff;
+  --green: #16a34a;
+  --green-bg: #f0fdf4;
+  --green-border: #bbf7d0;
+  --red: #dc2626;
+  --red-bg: #fef2f2;
+  --red-border: #fecaca;
+  /* High-contrast text for a SOLID red fill (e.g. Button danger's hover
+     state) — same paired-token idea as --accent/--accent-fg. Not just
+     "white": dark mode's --red is a light pastel red, where white text
+     would have poor contrast, so it flips to a near-black red instead. */
+  --red-fg: #fef2f2;
+  --yellow: #d97706;
+  --yellow-bg: #fffbeb;
+  --yellow-border: #fde68a;
+  --blue: #0284c7;
+  --blue-bg: #f0f9ff;
+  --blue-border: #bae6fd;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --radius-lg: 12px;
+
+  /*
+   * The Toggle switch's thumb is intentionally white in both themes (same
+   * as the mockup, which never overrides `.toggle-slider::before` under
+   * `[data-theme="dark"]`) — a token instead of a literal hex in
+   * Toggle.tsx so that choice stays declared here, not hardcoded in
+   * component code.
+   */
+  --toggle-thumb: #ffffff;
+}
+
+:root[data-theme='dark'] {
+  --bg: #020617;
+  --bg-secondary: #0b1220;
+  --bg-muted: #1e293b;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-subtle: #64748b;
+  /* Brighter/lighter than light mode's accent (same technique as the status
+     colors below) so it stays legible and vivid against a near-black
+     background; --accent-fg flips to a dark slate instead of white since
+     indigo-400 is light enough that dark text gives better contrast. */
+  --accent: #818cf8;
+  --accent-fg: #0f172a;
+  --green: #4ade80;
+  --green-bg: #052e16;
+  --green-border: #14532d;
+  --red: #f87171;
+  --red-bg: #450a0a;
+  --red-border: #7f1d1d;
+  --red-fg: #450a0a;
+  --yellow: #fbbf24;
+  --yellow-bg: #422006;
+  --yellow-border: #713f12;
+  --blue: #38bdf8;
+  --blue-bg: #082f49;
+  --blue-border: #075985;
+}
+
+/*
+ * Tailwind v4 is CSS-first: @theme both declares a CSS custom property AND
+ * registers a utility (bg-bg, text-text-muted, border-border-strong, ...).
+ * Each entry aliases the light/dark-switchable raw token above via var(),
+ * so the generated utility classes stay correct when [data-theme="dark"]
+ * overrides the raw --bg/--text/... values on :root.
+ */
+@theme {
+  --font-sans: 'Geist', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+
+  --color-bg: var(--bg);
+  --color-bg-secondary: var(--bg-secondary);
+  --color-bg-muted: var(--bg-muted);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+
+  --color-green: var(--green);
+  --color-green-bg: var(--green-bg);
+  --color-green-border: var(--green-border);
+  --color-red: var(--red);
+  --color-red-bg: var(--red-bg);
+  --color-red-border: var(--red-border);
+  --color-red-fg: var(--red-fg);
+  --color-yellow: var(--yellow);
+  --color-yellow-bg: var(--yellow-bg);
+  --color-yellow-border: var(--yellow-border);
+  --color-blue: var(--blue);
+  --color-blue-bg: var(--blue-bg);
+  --color-blue-border: var(--blue-border);
+
+  --color-toggle-thumb: var(--toggle-thumb);
+
+  --radius-DEFAULT: var(--radius);
+  --radius-sm: var(--radius-sm);
+  --radius-lg: var(--radius-lg);
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+}
+
+/* Toast slide-in-from-right, used by components/Toast.tsx via an arbitrary
+   `animate-[toast-in_0.2s_ease-out]` utility (no tailwindcss-animate plugin
+   installed, so the keyframes live here instead). */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Select dropdown panel open/close, used by ui/Select.tsx. */
+@keyframes select-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes select-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Tab panel fade-in, used by ui/Tabs.tsx. */
+@keyframes tabs-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

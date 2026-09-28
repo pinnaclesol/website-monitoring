@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "bundler",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "dom"],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@uptime/auth": ["libs/auth/src/index.ts"],
+      "@uptime/queue": ["libs/queue/src/index.ts"],
+      "@uptime/uptime-db": ["libs/uptime-db/src/index.ts"],
+      "@uptime/ui": ["libs/ui/src/index.ts"],
+      "@uptime/ui/*": ["libs/ui/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "tmp", "dist"]
+}

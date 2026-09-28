@@ -1,0 +1,311 @@
+// libs/uptime-db/prisma/schema.prisma
+//
+// Single shared Prisma schema for the uptime-monitor app. Both apps/api and
+// apps/worker talk to this one dedicated Postgres database through the
+// UptimePrismaService/UptimePrismaModule exported from @uptime/uptime-db —
+// neither app owns its own prisma/ folder or client.
+//
+// Plain PascalCase model/table names: this Postgres instance is fully
+// dedicated to this app, so there's no need for a shared-DB disambiguation
+// prefix the way billing-manager uses `Rebil_`. Names are deliberately
+// self-descriptive (`Monitor`, `MonitorCheck`, `MonitorAlertState`,
+// `AlertSettings`, `BrandingSettings`) rather than generic (`Site`, `Check`,
+// `AlertState`, `NotificationSettings`, `AppSettings`) — a dev browsing the
+// table list or the generated Prisma Client should be able to tell what
+// each one is for without cross-referencing this file.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// No sign-up route — the first user is seeded via `npm run uptime:seed`,
+/// further users are created from the `/users` view. Fully flexible RBAC:
+/// a user can hold any number of `Role`s (via `RoleUser`), and their
+/// effective permissions are the union of every role they hold — see
+/// `@uptime/auth`'s `hasPermission`. `isProtected` is a separate, narrower
+/// concept: it marks the one bootstrap account (always the env-seeded user)
+/// as immutable through the Users CRUD API entirely — not editable or
+/// deletable by anyone, including itself — so there's always a guaranteed
+/// way back in via the seed script even if every other admin is
+/// locked/removed.
+model User {
+  id          String     @id @default(cuid())
+  username    String     @unique // login handle — not shown in the UI beyond the Users list
+  name        String? // display name shown in the sidebar/UI; falls back to username if unset
+  password    String // bcrypt hash — never log or return in API responses
+  roles       RoleUser[]
+  isProtected Boolean    @default(false)
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("User")
+}
+
+/// A dynamic, admin-creatable role — a named bundle of `Permission`s,
+/// assignable to any number of `User`s. `isSystem` is true only for the one
+/// seeded "Admin" role: it can't be renamed, its permissions can't be
+/// edited, it can't be deleted, and it implicitly has every permission
+/// (bypasses `RolePermission` rows entirely) — same "guaranteed way back
+/// in" principle as `User.isProtected`, so a newly added `Permission` never
+/// silently fails to apply to Admins just because nobody remembered to
+/// assign it.
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       RoleUser[]
+  permissions RolePermission[]
+
+  @@map("Role")
+}
+
+/// Many-to-many User<->Role join — a user can hold several roles at once;
+/// effective permissions are the union of all of them.
+model RoleUser {
+  id     String @id @default(cuid())
+  roleId String
+  userId String
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, userId])
+  @@map("RoleUser")
+}
+
+/// The fixed catalog of enforcement points — one row per string ever passed
+/// to `@RequirePermission(...)`/`hasPermission(...)`. Seeded once (see
+/// `libs/uptime-db/src/seed.ts`), never created through the UI: adding a
+/// genuinely new permission always requires a code change to add the
+/// enforcement point itself, dynamic roles or not. `resource`/`action`
+/// group the Roles page's checkbox grid (e.g. resource="monitors",
+/// action="create") — that grid is built from this table, not hardcoded, so
+/// a newly seeded permission shows up with no frontend change.
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+
+  roles RolePermission[]
+
+  @@map("Permission")
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("RolePermission")
+}
+
+/// A monitored URL/domain — the core entity of the app. Soft-deleted via
+/// `deletedAt` so check/incident history survives removal from the
+/// dashboard. Named `Monitor` (not `Site`) to match the app's own UI
+/// language ("Add monitor", "Monitors" table) instead of an ambiguous word
+/// that could mean anything.
+model Monitor {
+  id        String    @id @default(cuid())
+  domain    String
+  label     String?
+  isPaused  Boolean   @default(false)
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  checks     MonitorCheck[]
+  incidents  Incident[]
+  alertState MonitorAlertState?
+
+  @@map("Monitor")
+}
+
+/// One health-check result performed by apps/worker for a Monitor. Capped
+/// at the newest 500 rows per monitor by the daily `cleanup` BullMQ job —
+/// this is an app-level housekeeping policy, not a DB constraint.
+model MonitorCheck {
+  id             String   @id @default(cuid())
+  monitorId      String
+  timestamp      DateTime @default(now())
+  isUp           Boolean
+  statusCode     Int?
+  responseTimeMs Int?
+  error          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  // Required for efficient "latest checks for a monitor" queries.
+  @@index([monitorId, timestamp(sort: Desc)])
+  @@map("MonitorCheck")
+}
+
+/// Downtime log for a Monitor. `endedAt = null` means the incident is
+/// currently open. Invariant (app-level, not DB-enforced): at most one open
+/// row (`endedAt = null`) per monitor at any time — opened on
+/// down-confirmed, closed on recovery. Not enforced with a partial unique
+/// index; the down/recovery state machine in apps/worker is responsible for
+/// upholding this.
+model Incident {
+  id        String    @id @default(cuid())
+  monitorId String
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@index([monitorId, startedAt(sort: Desc)])
+  @@map("Incident")
+}
+
+/// One row per Monitor, drives the down -> recovery alert dedup state
+/// machine: exactly one "down" alert per down period (`isDown` flips true
+/// the moment a down alert is sent, and stays true — no repeat/reminder
+/// alerts while still down) and exactly one "recovery" alert when it comes
+/// back up. `lastAlertSentAt` records when the down alert was sent, for
+/// reference only — nothing re-reads it to gate a repeat send. Mutated in
+/// place by apps/worker; no `updatedAt` since `lastAlertSentAt` already
+/// tracks the last meaningful state change.
+model MonitorAlertState {
+  id              String    @id @default(cuid())
+  monitorId       String    @unique
+  isDown          Boolean   @default(false)
+  lastAlertSentAt DateTime?
+
+  monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+
+  @@map("MonitorAlertState")
+}
+
+/// A Telegram bot/chat destination. Multiple rows = multiple destinations,
+/// managed from the Settings view.
+model TelegramAccount {
+  id        String   @id @default(cuid())
+  label     String
+  botToken  String // secret — never logged or returned in API responses
+  chatId    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("TelegramAccount")
+}
+
+/// Signal sender/recipient pairing. Single config (not multi-account) —
+/// requires a running signal-cli-rest-api sidecar with a registered phone
+/// number, so this models an infra-bound integration, not just a credential.
+model SignalConfig {
+  id              String   @id @default(cuid())
+  senderNumber    String
+  recipientNumber String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("SignalConfig")
+}
+
+/// The SMTP relay email alerts are sent through — single config (not
+/// multi-account, same pattern as SignalConfig), configured from the
+/// Settings view instead of env vars. `password` is a secret: never
+/// returned by the API (GET exposes only a `hasPassword` boolean); leaving
+/// the password field blank on an update keeps the existing one, same UX as
+/// editing a User's password.
+model SmtpConfig {
+  id        String   @id @default(cuid())
+  host      String
+  port      Int      @default(587)
+  username  String?
+  password  String? // secret — never logged or returned in API responses
+  fromEmail String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("SmtpConfig")
+}
+
+/// An email address that receives alert notifications, sent via the
+/// SmtpConfig relay above.
+model EmailRecipient {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("EmailRecipient")
+}
+
+/// Singleton row: how often apps/worker checks each active Monitor (default
+/// 60s). Deliberately its own table, not a field on AlertSettings — this is
+/// monitoring cadence, not alert-dispatch behavior, a different concern.
+/// Changing it re-registers every active monitor's BullMQ repeatable
+/// schedule (`MonitorsService.rescheduleAllActive`) so the new interval
+/// takes effect immediately, not just for monitors created/resumed after.
+model MonitoringSettings {
+  id                   String   @id @default(cuid())
+  checkIntervalSeconds Int      @default(60)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("MonitoringSettings")
+}
+
+/// Singleton row: recovery-alert behavior shared by all notification
+/// channels (Telegram/Signal/Email). Modeled as a normal table — the app is
+/// responsible for ever only upserting a single row; no DB-level singleton
+/// enforcement (e.g. a fixed/hardcoded id) is required. Named `AlertSettings`
+/// (not the more generic `NotificationSettings`) since that's precisely what
+/// it holds. No repeat-reminder interval, deliberately: exactly one alert
+/// per down period (see `MonitorAlertState`'s doc comment), not a repeating
+/// nag while a monitor stays down.
+model AlertSettings {
+  id                   String   @id @default(cuid())
+  recoveryAlertEnabled Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@map("AlertSettings")
+}
+
+/// Singleton row: dashboard branding. Same app-enforced-singleton pattern as
+/// AlertSettings — no DB-level singleton constraint, the app only ever
+/// upserts one row. Named `BrandingSettings` (not the more generic
+/// `AppSettings`) to say exactly what it configures, and matches its own API
+/// route (`/settings/branding`). Two independent pairs: `appName`/
+/// `appLogoUrl` (in-app branding — sidebar) and `siteTitle`/`faviconUrl`
+/// (browser-facing — tab title/icon). Both image fields hold a
+/// `/uploads/<file>` path written by apps/web's local upload route, not a
+/// pasted external URL.
+model BrandingSettings {
+  id         String   @id @default(cuid())
+  appName    String   @default("Uptime Monitor") // sidebar product name
+  appLogoUrl String? // sidebar logo mark
+  siteTitle  String   @default("Uptime Monitor") // browser tab <title>
+  faviconUrl String? // browser tab icon
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("BrandingSettings")
+}

@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "NX_DAEMON": "false"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(nx *)",
+      "Bash(npx prisma *)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git checkout *)",
+      "Bash(git branch *)",
+      "Bash(node run-prisma.js *)",
+      "Bash(npx tsx *)",
+      "Edit(/.claude/skills/new-api-resource/**)",
+      "Bash(npx nx *)",
+      "Bash(grep -n \"RBAC\\\\|roles/permissions\\\\|ADMIN.*EDITOR.*VIEWER\\\\|Users \\(\\\\`/users\\\\`\" CLAUDE.md)",
+      "Bash(netstat -ano)",
+      "Bash(disown)",
+      "Bash(echo \"started, pid: $!\")",
+      "Bash(curl -s http://localhost:4001/api/auth/validate -X POST -H \"Content-Type: application/json\" -d '{\"username\":\"nope\",\"password\":\"nope\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:4002/health -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(taskkill //F //T //PID 1015)",
+      "Bash(taskkill //F //PID 27144)",
+      "Bash(taskkill //F //PID 18932)",
+      "Bash(taskkill //F //PID 28464)",
+      "Bash(tasklist)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File \"C:\\\\Users\\\\devel\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--projects-billing-manager-uptime-monitor-website-monitoring\\\\442f7589-ff53-4ec3-a789-b8800d22dc4a\\\\scratchpad\\\\find-lock.ps1\")",
+      "Bash(tasklist //FI \"PID eq 24264\")",
+      "Bash(tasklist //FI \"PID eq 24412\")",
+      "Bash(taskkill //F //PID 24264)",
+      "Bash(taskkill //F //PID 24412)",
+      "Bash(node -e ' *)",
+      "Bash(DOTENV_CONFIG_PATH=.env node -r dotenv/config -e ' *)",
+      "Bash(tasklist //FI \"PID eq 30596\")",
+      "Bash(taskkill //F //PID 30596)",
+      "Bash(tasklist //FI \"PID eq 16736\")",
+      "Bash(tasklist //FI \"PID eq 12876\")",
+      "Bash(taskkill //F //PID 16736)",
+      "Bash(taskkill //F //PID 12876)",
+      "Bash(grep -B5 \"data-theme=\\\\\"dark\\\\\"\" /tmp/dev-server.log | head -30 *)",
+      "Bash(taskkill //F //PID 15092)",
+      "Bash(taskkill //F //PID 11184)",
+      "Bash(taskkill //F //PID 30212)",
+      "Bash(taskkill //F //PID 18788)",
+      "Bash(taskkill //F //PID 33640)",
+      "Bash(taskkill //F //PID 7708)",
+      "Bash(taskkill //F //PID 12948)",
+      "Bash(taskkill //F //PID 22232)",
+      "Bash(rm -f /tmp/nextauth-cookies2.txt /tmp/nextauth-cookies.txt /tmp/users-page.html)",
+      "Bash(taskkill //F //PID 5572)",
+      "Bash(taskkill //F //PID 35852)",
+      "Bash(taskkill //F //PID 35904)",
+      "Bash(taskkill //F //PID 25268)",
+      "Bash(taskkill //F //PID 13140)",
+      "Bash(taskkill //F //PID 36796)",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(curl -s http://localhost:4000/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -o /dev/null -w \"HTTP %{http_code}, size: %{size_download} bytes\\\\n\")",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@__TRACKED_VAR__/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(MSYS_NO_PATHCONV=1 curl -s -b nextauth-cookies3.txt -X POST http://localhost:4000/api/upload -F 'file=@C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/test-logo.png;type=image/png' -F previousUrl=/uploads/cc324f46-5db8-49f1-92a7-2d69ebe51a49.png -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(rm -f \"D:/projects/billing-manager/uptime-monitor/website-monitoring/apps/web/public/uploads/\"*.png *)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/api/settings/branding)",
+      "Bash(curl -s http://localhost:4000/login)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/api/users)",
+      "Bash(curl -sI http://localhost:4000/login)",
+      "Bash(curl -s http://localhost:4000/login?nocache=__TRACKED_VAR__)",
+      "Bash(taskkill //F //PID 36876)",
+      "Bash(taskkill //F //PID 40016)",
+      "Bash(taskkill //F //PID 36528)",
+      "Bash(curl -s -b nextauth-cookies3.txt http://localhost:4000/)",
+      "Bash(grep -rEn \"#[0-9a-fA-F]{3,8}\" libs/ui/src apps/web/app --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -o \"bg-accent[^,{]*{[^}]\\\\{1,80\\\\}\" /tmp/compiled.css)",
+      "Bash(rm -f /tmp/compiled.css \"C:/Users/devel/AppData/Local/Temp/claude/d--projects-billing-manager-uptime-monitor-website-monitoring/442f7589-ff53-4ec3-a789-b8800d22dc4a/scratchpad/compiled.css\")",
+      "Bash(taskkill //F //PID 36872)",
+      "Bash(taskkill //F //PID 36560)",
+      "Bash(taskkill //F //PID 2996)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const m=JSON.parse\\(d\\); console.log\\(m.map\\(x=>\\({domain:x.domain,label:x.label}\\)\\)\\)}\\)\")",
+      "Bash(taskkill //F //PID 43824)",
+      "Bash(taskkill //F //PID 37348)",
+      "Bash(taskkill //F //PID 29716)",
+      "Bash(taskkill //F //PID 7396)",
+      "Bash(taskkill //F //PID 41744)",
+      "Bash(taskkill //F //PID 43856)",
+      "Bash(taskkill //F //PID 47192)",
+      "Bash(taskkill //F //PID 45556)",
+      "Bash(taskkill //F //PID 44104)",
+      "Bash(curl -s -b notif-cookies.txt http://localhost:4000/api/settings/smtp-config -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(taskkill //F //PID 41504)",
+      "Bash(taskkill //F //PID 40928)",
+      "Bash(taskkill //F //PID 5140)",
+      "Bash(taskkill //F //PID 43920)",
+      "Bash(taskkill //F //PID 46164)",
+      "Bash(taskkill //F //PID 28736)",
+      "Bash(taskkill //F //PID 38952)",
+      "Bash(taskkill //F //PID 27784)",
+      "Bash(node -e \"let d='';process.stdin.on\\('data',c=>d+=c\\);process.stdin.on\\('end',\\(\\)=>{const m=JSON.parse\\(d\\); console.log\\(m.map\\(x=>\\({id:x.id,domain:x.domain,isPaused:x.isPaused}\\)\\)\\)}\\)\")",
+      "Bash(xargs grep -l \"createMonitorChecksQueue\")"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(DROP *)",
+      "Bash(npx prisma migrate reset*)"
+    ],
+    "additionalDirectories": [
+      "\\tmp",
+      "D:\\projects\\billing-manager\\uptime-monitor\\website-monitoring\\apps\\web\\public\\uploads"
+    ]
+  },
+  "model": "sonnet",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '=== Uptime Monitor Monorepo ===\nApps: web(:4000) api(:4001) worker(:4002)\nDB:    libs/uptime-db/prisma/schema.prisma -> dedicated Postgres (uptime_db)\nQueue: Redis + BullMQ via libs/queue - api is PRODUCER only, worker is CONSUMER only\nUI:    libs/ui/src - design tokens only, no ad-hoc hex colors\nRun:   npm run dev\n\n! worker is the ONLY app allowed to call monitored sites directly.\n! Every Write/Edit below is auto-typechecked + linted - no need to run it by hand.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash(npm run dev*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/check-env.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsc --noEmit -p tsconfig.base.json 2>&1 | head -20 || true"
+          },
+          {
+            "type": "command",
+            "command": "npx nx affected --target=lint --uncommitted 2>&1 | tail -30 || true"
+          }
+        ]
+      }
+    ]
+  }
+}

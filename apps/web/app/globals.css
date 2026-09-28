@@ -1,0 +1,12 @@
+/*
+ * Re-exports the @uptime/ui design-token stylesheet as a single import point
+ * for apps/web (imported once from app/layout.tsx). Uses a relative path
+ * rather than the `@uptime/ui/styles/globals.css` alias: that alias is a
+ * *TypeScript* path mapping (resolved by webpack for JS/TS `import`
+ * statements), but this is a raw CSS `@import`, which PostCSS/lightningcss
+ * resolve via plain Node package resolution instead — and libs/ui's
+ * package.json has no `exports` subpath map, so a bare `@uptime/ui/styles/...`
+ * specifier here would resolve to `node_modules/@uptime/ui/styles/...`
+ * (missing the `src/` segment) and 404. The relative path sidesteps that.
+ */
+@import '../../../libs/ui/src/styles/globals.css';
