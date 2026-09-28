@@ -33,6 +33,9 @@ export type { ModalProps } from './components/ui/Modal';
 export { EmptyState } from './components/ui/EmptyState';
 export type { EmptyStateProps } from './components/ui/EmptyState';
 
+export { Tooltip } from './components/ui/Tooltip';
+export type { TooltipProps } from './components/ui/Tooltip';
+
 export { ImageUpload } from './components/ui/ImageUpload';
 export type { ImageUploadProps } from './components/ui/ImageUpload';
 

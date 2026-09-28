@@ -4,7 +4,7 @@ import { createCleanupQueue, createWorker, QUEUE_NAMES, CleanupJobData } from '@
 import { UptimePrismaService } from '@uptime/uptime-db';
 
 /** Keep the newest N MonitorCheck rows per monitor; older rows are pruned daily. */
-const CHECKS_TO_KEEP_PER_MONITOR = 100;
+const CHECKS_TO_KEEP_PER_MONITOR = 500;
 
 /**
  * Stable jobId so re-registering the repeatable job on every worker restart

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { hasPermission } from '@uptime/auth';
 import {
@@ -21,17 +21,21 @@ import {
   IncidentBanner,
   EmptyState,
   ConfirmDialog,
+  Tooltip,
   useToast,
 } from '@uptime/ui';
 import { apiFetch } from '../../lib/api-client';
-import { monitorStatus, type MonitorWithStatus, type MonitoringSettings } from '../../lib/types';
-import { stripProtocol } from '../../lib/format';
+import type { MonitorWithStatus, MonitoringSettings, MonitorListResponse, MonitorStats } from '../../lib/types';
+import { stripProtocol, formatDuration, formatIntervalWords } from '../../lib/format';
 import { MonitorRow } from './monitor-row';
 import { MonitorModal } from './monitor-modal';
 import { useSiteName } from './site-name-context';
 import { PermissionGate } from './permission-gate';
 
 const POLL_INTERVAL_MS = 15000;
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const SEARCH_DEBOUNCE_MS = 300;
 
 function SearchIcon() {
   return (
@@ -64,10 +68,48 @@ function ArrowRightIcon() {
     </svg>
   );
 }
-function TargetIcon() {
+function LayersIcon() {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <polygon points="12 2 22 8.5 12 15 2 8.5 12 2" />
+      <polyline points="2 15.5 12 22 22 15.5" />
+      <polyline points="2 12 12 18.5 22 12" />
+    </svg>
+  );
+}
+function CheckCircleIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <circle cx="12" cy="12" r="10" />
+      <polyline points="8 12.5 11 15.5 16 9" />
+    </svg>
+  );
+}
+function XCircleIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="14.5" y1="9.5" x2="9.5" y2="14.5" />
+      <line x1="9.5" y1="9.5" x2="14.5" y2="14.5" />
+    </svg>
+  );
+}
+function TimerIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <line x1="10" y1="2" x2="14" y2="2" />
+      <line x1="12" y1="6" x2="12" y2="3" />
+      <circle cx="12" cy="14" r="8" />
+      <polyline points="12 10 12 14 15 16" />
+    </svg>
+  );
+}
+function InfoIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="11.5" />
+      <circle cx="12" cy="8" r="0.5" fill="currentColor" stroke="none" />
     </svg>
   );
 }
@@ -89,7 +131,12 @@ export default function DashboardPage() {
   const canUpdate = !!permissions && hasPermission(permissions, 'monitors:update');
   const canDelete = !!permissions && hasPermission(permissions, 'monitors:delete');
   const [monitors, setMonitors] = useState<MonitorWithStatus[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [stats, setStats] = useState<MonitorStats | null>(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [addOpen, setAddOpen] = useState(false);
   const [editingMonitor, setEditingMonitor] = useState<MonitorWithStatus | null>(null);
@@ -111,16 +158,46 @@ export default function DashboardPage() {
       });
   }, []);
 
+  // Debounced so typing a search term doesn't fire a request per keystroke —
+  // search/status filtering happens server-side now (see `load` below), not
+  // over a fully-loaded array, so every keystroke would otherwise be a real
+  // round trip.
+  useEffect(() => {
+    const timeout = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  // A changed search/filter/page-size invalidates whatever page you were on
+  // — e.g. being on page 3 of "all" and then filtering to "down" (or
+  // switching to a larger page size) shouldn't silently keep you on page 3
+  // of a much shorter result set.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, pageSize]);
+
   const load = useCallback(async () => {
     try {
-      const data = await apiFetch<MonitorWithStatus[]>('monitors');
-      setMonitors(data);
+      const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
+
+      // Two independent endpoints on purpose: this page's monitor rows
+      // (server-side paginated — only ever one page's worth in the browser)
+      // versus the dashboard-wide stat cards / incident banner, which must
+      // reflect every monitor regardless of which page or filter is active.
+      const [list, statsResult] = await Promise.all([
+        apiFetch<MonitorListResponse>(`monitors?${params.toString()}`),
+        apiFetch<MonitorStats>('monitors/stats'),
+      ]);
+      setMonitors(list.data);
+      setTotal(list.total);
+      setStats(statsResult);
     } catch {
       // Poll silently retries — a toast on every failed background poll would be noisy.
     } finally {
       setSecondsToRefresh(POLL_INTERVAL_MS / 1000);
     }
-  }, []);
+  }, [page, pageSize, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     load();
@@ -155,15 +232,14 @@ export default function DashboardPage() {
   }
 
   async function checkAll() {
-    const targets = (monitors ?? []).filter((m) => !m.isPaused);
-    if (targets.length === 0) {
-      toast({ type: 'info', title: 'No active monitors', message: 'Add or resume a monitor first.' });
-      return;
-    }
     setCheckingAll(true);
     try {
-      await Promise.all(targets.map((m) => apiFetch(`monitors/${m.id}/check-now`, { method: 'POST' })));
-      toast({ type: 'info', title: 'Checks queued', message: `${targets.length} monitor(s) will be checked shortly` });
+      const result = await apiFetch<{ queued: number }>('monitors/check-all', { method: 'POST' });
+      if (result.queued === 0) {
+        toast({ type: 'info', title: 'No active monitors', message: 'Add or resume a monitor first.' });
+      } else {
+        toast({ type: 'info', title: 'Checks queued', message: `${result.queued} monitor(s) will be checked shortly` });
+      }
       load();
     } catch (err) {
       toast({ type: 'error', title: 'Could not queue checks', message: err instanceof Error ? err.message : undefined });
@@ -172,29 +248,8 @@ export default function DashboardPage() {
     }
   }
 
-  const filtered = useMemo(() => {
-    if (!monitors) return [];
-    return monitors.filter((monitor) => {
-      const q = search.trim().toLowerCase();
-      const matchesSearch =
-        !q || monitor.domain.toLowerCase().includes(q) || (monitor.label ?? '').toLowerCase().includes(q);
-      const matchesStatus = statusFilter === 'all' || monitorStatus(monitor) === statusFilter;
-      return matchesSearch && matchesStatus;
-    });
-  }, [monitors, search, statusFilter]);
-
-  const stats = useMemo(() => {
-    const enabled = (monitors ?? []).filter((m) => !m.isPaused);
-    const up = enabled.filter((m) => m.latestCheck?.isUp).length;
-    const down = enabled.filter((m) => m.latestCheck && !m.latestCheck.isUp).length;
-    const responseTimes = enabled.map((m) => m.latestCheck?.responseTimeMs).filter((v): v is number => v != null);
-    const avg = responseTimes.length
-      ? Math.round(responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length)
-      : null;
-    return { total: monitors?.length ?? 0, up, down, avg };
-  }, [monitors]);
-
-  const downMonitors = (monitors ?? []).filter((m) => m.hasOpenIncident);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const isFiltering = debouncedSearch !== '' || statusFilter !== 'all';
 
   async function handleDelete() {
     if (!deleteTarget) return;
@@ -234,55 +289,64 @@ export default function DashboardPage() {
       </Topbar>
       <div className="flex-1 p-6">
         <IncidentBanner>
-          {downMonitors.length > 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+          {stats && stats.openIncidents > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <div>
                 <span className="font-semibold">
-                  {downMonitors.length} monitor{downMonitors.length > 1 ? 's are' : ' is'} currently down.
+                  {stats.openIncidents} monitor{stats.openIncidents > 1 ? 's are' : ' is'} currently down.
                 </span>{' '}
                 <span className="text-red/85">
-                  {downMonitors.length > 1 ? 'They are' : 'It is'} not responding to health checks.
+                  {stats.openIncidents > 1 ? 'They are' : 'It is'} not responding to health checks.
                 </span>
               </div>
-              <a
-                href="/incidents"
-                className="inline-flex shrink-0 items-center gap-1 text-[12.5px] font-semibold text-red hover:underline"
-              >
-                View incidents
-                <ArrowRightIcon />
-              </a>
+              <Button asChild variant="danger" size="sm" className="shrink-0">
+                <a href="/incidents">
+                  View incidents
+                  <ArrowRightIcon />
+                </a>
+              </Button>
             </div>
           ) : null}
         </IncidentBanner>
 
         <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard
-            icon={<TargetIcon />}
+            icon={<LayersIcon />}
             label="Total monitors"
-            value={stats.total}
+            value={stats?.total ?? 0}
             sub="URLs being tracked"
             accent="blue"
           />
           <StatCard
-            icon={<BareIcon d="M22 11.08V12a10 10 0 11-5.93-9.14" />}
+            icon={<CheckCircleIcon />}
             label="Online"
-            value={stats.up}
+            value={stats?.up ?? 0}
             accent="green"
             sub="Responding normally"
           />
           <StatCard
-            icon={<BareIcon d="M15 9l-6 6M9 9l6 6" />}
+            icon={<XCircleIcon />}
             label="Down"
-            value={stats.down}
+            value={stats?.down ?? 0}
             accent="red"
+            pulse={!!stats && stats.down > 0}
             sub="Not responding"
           />
           <StatCard
-            icon={<BareIcon d="M22 12h-4l-3 9L9 3l-3 9H2" />}
-            label="Avg response"
-            value={stats.avg === null ? '—' : `${stats.avg}ms`}
-            accent="yellow"
-            sub="Across all monitors"
+            icon={<TimerIcon />}
+            label="Longest outage"
+            value={
+              stats?.longestOpenIncident
+                ? formatDuration(Date.now() - new Date(stats.longestOpenIncident.startedAt).getTime())
+                : '—'
+            }
+            accent={stats?.longestOpenIncident ? 'red' : 'green'}
+            pulse={!!stats?.longestOpenIncident}
+            sub={
+              stats?.longestOpenIncident
+                ? stats.longestOpenIncident.label || stripProtocol(stats.longestOpenIncident.domain)
+                : 'No active outages'
+            }
           />
         </div>
 
@@ -291,7 +355,8 @@ export default function DashboardPage() {
             <div>
               <CardTitle>Monitors</CardTitle>
               <CardDescription>
-                Checked every {checkIntervalSeconds}s — last 30 checks shown as bars, 100 stored per monitor
+                Checks run every {formatIntervalWords(checkIntervalSeconds)} — showing the most recent 30 checks as
+                bars, with up to 500 kept in history per monitor
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -337,50 +402,94 @@ export default function DashboardPage() {
 
           {monitors === null ? (
             <div className="px-6 py-11 text-center text-sm text-text-muted">Loading…</div>
-          ) : filtered.length === 0 ? (
+          ) : monitors.length === 0 ? (
             <EmptyState
               icon={<BareIcon d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />}
-              title={monitors.length === 0 ? 'No monitors yet' : 'No matches'}
-              description={
-                monitors.length === 0
-                  ? 'Add a URL above to start tracking uptime'
-                  : 'Try a different search or filter'
-              }
+              title={isFiltering ? 'No matches' : 'No monitors yet'}
+              description={isFiltering ? 'Try a different search or filter' : 'Add a URL above to start tracking uptime'}
             />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="border-b border-border bg-bg-secondary">
-                    <th className="w-11 px-5 py-2.5" />
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Monitor</th>
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Status</th>
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Response</th>
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Last checked</th>
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">
-                      Last 30 checks
-                    </th>
-                    <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">
-                      Uptime (24h)
-                    </th>
-                    <th className="w-20 px-5 py-2.5" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((monitor) => (
-                    <MonitorRow
-                      key={monitor.id}
-                      monitor={monitor}
-                      canUpdate={canUpdate}
-                      canDelete={canDelete}
-                      onChanged={load}
-                      onEditRequested={setEditingMonitor}
-                      onDeleteRequested={setDeleteTarget}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-border bg-bg-secondary">
+                      <th className="w-11 px-5 py-2.5" />
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Monitor</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Status</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Response</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Last checked</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">
+                        Last 30 checks
+                      </th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">
+                        <span className="inline-flex items-center gap-1">
+                          Uptime (24h)
+                          <Tooltip content="Percentage of time this monitor was up over the last 24 hours (or since it was added, if that was more recently)">
+                            <InfoIcon />
+                          </Tooltip>
+                        </span>
+                      </th>
+                      <th className="w-20 px-5 py-2.5" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monitors.map((monitor) => (
+                      <MonitorRow
+                        key={monitor.id}
+                        monitor={monitor}
+                        canUpdate={canUpdate}
+                        canDelete={canDelete}
+                        onChanged={load}
+                        onEditRequested={setEditingMonitor}
+                        onDeleteRequested={setDeleteTarget}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-text-muted">
+                    Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+                  </span>
+                  <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                    <SelectTrigger className="h-7 w-[122px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <SelectItem key={size} value={String(size)}>
+                          {size} per page
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page <= 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-xs text-text-muted">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page >= totalPages}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
         </Card>
       </div>

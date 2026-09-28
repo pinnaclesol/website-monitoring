@@ -19,5 +19,5 @@ export interface AlertDispatchJobData {
   downtimeMs?: number;
 }
 
-/** Payload for the daily `cleanup` job — trims each Monitor's MonitorCheck rows to the newest 100. No fields needed. */
+/** Payload for the daily `cleanup` job — trims each Monitor's MonitorCheck rows to the newest 500. No fields needed. */
 export type CleanupJobData = Record<string, never>;

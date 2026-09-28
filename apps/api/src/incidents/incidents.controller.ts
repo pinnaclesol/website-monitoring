@@ -10,7 +10,7 @@ export class IncidentsController {
   @Get()
   @RequirePermission('incidents:view')
   findAll(@Query() query: ListIncidentsQueryDto) {
-    return this.incidentsService.findAll(query.monitorId, query.open);
+    return this.incidentsService.findAll(query);
   }
 
   @Get(':id')

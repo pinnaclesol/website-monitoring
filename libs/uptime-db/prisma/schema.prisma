@@ -138,7 +138,7 @@ model Monitor {
 }
 
 /// One health-check result performed by apps/worker for a Monitor. Capped
-/// at the newest 100 rows per monitor by the daily `cleanup` BullMQ job —
+/// at the newest 500 rows per monitor by the daily `cleanup` BullMQ job —
 /// this is an app-level housekeeping policy, not a DB constraint.
 model MonitorCheck {
   id             String   @id @default(cuid())

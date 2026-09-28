@@ -37,18 +37,20 @@ function IncidentBanner({ children, className, ...props }: IncidentBannerProps) 
     <div
       role="alert"
       className={cn(
-        'mb-5 flex items-start gap-3 rounded-lg border border-red-border bg-red-bg px-4 py-3 shadow-sm',
+        'relative mb-5 flex items-start gap-3.5 overflow-hidden rounded-xl border border-red-border bg-red-bg py-3.5 pl-5 pr-4 shadow-md',
+        'before:absolute before:inset-y-0 before:left-0 before:w-1 before:bg-red',
         className
       )}
       {...props}
     >
       <span
         aria-hidden="true"
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-red/15 text-red"
+        className="relative flex size-9 shrink-0 items-center justify-center rounded-full bg-red/15 text-red ring-4 ring-red/10"
       >
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-red/20" />
         <WarningIcon />
       </span>
-      <div className="min-w-0 flex-1 pt-0.5 text-[13px] leading-snug text-red">{children}</div>
+      <div className="min-w-0 flex-1 pt-1 text-[13px] leading-snug text-red">{children}</div>
     </div>
   );
 }

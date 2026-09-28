@@ -11,6 +11,8 @@ export interface StatCardProps extends React.HTMLAttributes<HTMLDivElement> {
   sub?: React.ReactNode;
   /** Drives the icon chip's color, the value's text color, and the corner glow — one knob, not three, so they never disagree. */
   accent?: StatCardAccent;
+  /** Adds a pulsing ring behind the icon chip — reserve for a card reporting something actively wrong right now (e.g. a nonzero "Down" count), not for neutral totals. */
+  pulse?: boolean;
 }
 
 const chipClasses: Record<StatCardAccent, string> = {
@@ -38,17 +40,35 @@ const glowClasses: Record<StatCardAccent, string> = {
   yellow: 'bg-yellow/15',
 };
 
+/** A faint ring around the icon chip, same accent, for depth — matches IncidentBanner's icon treatment. */
+const ringClasses: Record<StatCardAccent, string> = {
+  default: 'ring-text-subtle/10',
+  blue: 'ring-blue/10',
+  green: 'ring-green/10',
+  red: 'ring-red/10',
+  yellow: 'ring-yellow/10',
+};
+
+/** The `pulse` prop's ping animation color — one shade lighter than the ring so it reads as motion, not just a static halo. */
+const pingClasses: Record<StatCardAccent, string> = {
+  default: 'bg-text-subtle/20',
+  blue: 'bg-blue/20',
+  green: 'bg-green/20',
+  red: 'bg-red/20',
+  yellow: 'bg-yellow/20',
+};
+
 /**
  * A colored icon chip (not a bare gray glyph) is what makes a stat card read
  * as designed rather than a plain data label — one visual anchor per card,
  * driven by the same `accent` that colors the value and the corner glow, so
  * a "Down" card in red reads as a unit instead of unrelated colored pieces.
  */
-function StatCard({ icon, label, value, sub, accent = 'default', className, ...props }: StatCardProps) {
+function StatCard({ icon, label, value, sub, accent = 'default', pulse = false, className, ...props }: StatCardProps) {
   return (
     <div
       className={cn(
-        'group relative overflow-hidden rounded-lg border border-border bg-bg p-4 shadow-sm transition-all duration-150',
+        'group relative overflow-hidden rounded-xl border border-border bg-bg p-4 shadow-sm transition-all duration-150',
         'hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md',
         className
       )}
@@ -72,11 +92,15 @@ function StatCard({ icon, label, value, sub, accent = 'default', className, ...p
           <span
             aria-hidden="true"
             className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-4 [&_svg]:shrink-0',
-              chipClasses[accent]
+              'relative flex size-10 shrink-0 items-center justify-center rounded-xl ring-4 [&_svg]:size-4 [&_svg]:shrink-0',
+              chipClasses[accent],
+              ringClasses[accent]
             )}
           >
-            {icon}
+            {pulse ? (
+              <span className={cn('absolute inline-flex size-full animate-ping rounded-xl', pingClasses[accent])} />
+            ) : null}
+            <span className="relative">{icon}</span>
           </span>
         ) : null}
       </div>

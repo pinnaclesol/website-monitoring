@@ -13,7 +13,7 @@ You are the check-engine specialist for `apps/worker` in the uptime-monitor NX m
 **Queues** (via `@uptime/queue`, consumer side only — never a `Queue` producer call here except internally re-enqueueing):
 - `monitor-checks` — GET the monitor's URL, 10s timeout. Retry/backoff is native BullMQ job options (`attempts: 2, backoff: { type: 'fixed', delay: 5000 }`) — do not hand-roll a `setTimeout`-based retry. A check only counts as confirmed-down after both attempts fail. Write every final result to `MonitorCheck`.
 - `alert-dispatch` — separate queue, separate consumer concurrency, so a slow/rate-limited Telegram or SMTP call never delays the next monitor check.
-- `cleanup` — daily repeatable job, trims each monitor's `MonitorCheck` rows to the newest 100.
+- `cleanup` — daily repeatable job, trims each monitor's `MonitorCheck` rows to the newest 500.
 
 **Alert-state machine — treat these as hard invariants, not guidelines**:
 - up → confirmed-down: open a new `Incident` (`startedAt = now`), enqueue a down alert to every active `TelegramAccount`, the active `SignalConfig` (if any), and every active `EmailRecipient`. Set `MonitorAlertState.isDown = true`, `lastAlertSentAt = now`.

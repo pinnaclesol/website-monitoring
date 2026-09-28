@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@uptime/uptime-db';
 import { UptimePrismaService } from '@uptime/uptime-db';
 import { createMonitorChecksQueue } from '@uptime/queue';
 import { CreateMonitorDto } from './dto/create-monitor.dto';
 import { UpdateMonitorDto } from './dto/update-monitor.dto';
+import { ListMonitorsQueryDto, type MonitorStatusFilter } from './dto/list-monitors-query.dto';
 
 const MONITOR_CHECK_JITTER_MS = 10_000;
 const MONITOR_CHECK_JOB_NAME = 'monitor-check';
@@ -34,27 +36,155 @@ export class MonitorsService {
   constructor(private readonly prisma: UptimePrismaService) {}
 
   /**
-   * The dashboard's monitor list — each Monitor enriched with its latest
-   * check, a 30-check history for the sparkline, 24h uptime
-   * (incident-overlap based, per CLAUDE.md — not a raw MonitorCheck-sample
-   * ratio), and whether it has an open incident right now. Still entirely
-   * read-only on MonitorCheck/Incident data — apps/api only ever reads
-   * them, never writes.
-   *
-   * Implementation note: this loads every check/incident for the given
-   * monitors in a couple of batched queries rather than one query per
-   * monitor, which is fine at the monitor counts this dashboard is
-   * actually tested with. At true thousands-of-monitors scale this should
-   * move to a denormalized "latest status" projection instead of scanning
-   * MonitorCheck rows on every poll — flagging it here rather than building
-   * that prematurely.
+   * The dashboard's monitor list — **server-side paginated** (page/pageSize,
+   * default 20/page) with search and status filtering done in the DB query
+   * itself, not client-side over a fully-loaded array — the whole point at
+   * thousands-of-monitors scale is that the browser only ever holds one
+   * page's worth of monitors, and only that page's checks/incidents get
+   * enriched below. Each returned Monitor carries its latest check, a
+   * 30-check history for the sparkline, 24h uptime (incident-overlap based,
+   * per CLAUDE.md — not a raw MonitorCheck-sample ratio), and whether it has
+   * an open incident right now. Still entirely read-only on
+   * MonitorCheck/Incident data — apps/api only ever reads them, never
+   * writes. Dashboard-wide aggregates (total counts, avg response time) do
+   * NOT come from this paginated list — see `computeStats()`, which scans
+   * every monitor regardless of page.
    */
-  async findAll() {
-    const monitors = await this.prisma.monitor.findMany({
-      where: { deletedAt: null },
-      orderBy: { createdAt: 'desc' },
+  async findAll(query: ListMonitorsQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const where = this.buildListWhere(query);
+
+    const [total, monitors] = await Promise.all([
+      this.prisma.monitor.count({ where }),
+      this.prisma.monitor.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+
+    return { data: await this.enrich(monitors), total, page, pageSize };
+  }
+
+  private buildListWhere(query: ListMonitorsQueryDto): Prisma.MonitorWhereInput {
+    const search = query.search?.trim();
+    return {
+      deletedAt: null,
+      ...(search
+        ? {
+            OR: [
+              { domain: { contains: search, mode: 'insensitive' } },
+              { label: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      ...this.statusWhere(query.status ?? 'all'),
+    };
+  }
+
+  /**
+   * Mirrors `apps/web`'s `monitorStatus()` derivation exactly (isPaused
+   * first, then whether it's ever been checked, then its latest result) —
+   * expressed as `Monitor`↔`MonitorCheck`/`Incident` relation filters so
+   * the DB does the filtering, not a client-side `.filter()` over every
+   * monitor.
+   */
+  private statusWhere(status: MonitorStatusFilter): Prisma.MonitorWhereInput {
+    switch (status) {
+      case 'paused':
+        return { isPaused: true };
+      case 'down':
+        return { isPaused: false, incidents: { some: { endedAt: null } } };
+      case 'up':
+        return { isPaused: false, incidents: { none: { endedAt: null } }, checks: { some: {} } };
+      case 'checking':
+        return { isPaused: false, checks: { none: {} } };
+      case 'all':
+      default:
+        return {};
+    }
+  }
+
+  /**
+   * Dashboard-wide stat-card figures (total/up/down/longest ongoing outage)
+   * — computed across *every* non-deleted monitor, independent of the
+   * paginated list's current page/search/status filter. `down` here mirrors
+   * the stat card's pre-existing definition (latest check failed);
+   * `openIncidents` is the separate, state-machine-confirmed "down" count
+   * the incident banner uses (see its own comment below for why they can
+   * differ). `distinct: ['monitorId']` gets each monitor's single latest
+   * check in one indexed query — no per-monitor round trip, no over-fetch.
+   */
+  async computeStats() {
+    const [total, paused, activeMonitors] = await Promise.all([
+      this.prisma.monitor.count({ where: { deletedAt: null } }),
+      this.prisma.monitor.count({ where: { deletedAt: null, isPaused: true } }),
+      this.prisma.monitor.findMany({ where: { deletedAt: null, isPaused: false }, select: { id: true } }),
+    ]);
+    const activeIds = activeMonitors.map((m) => m.id);
+
+    let up = 0;
+    let down = 0;
+
+    if (activeIds.length > 0) {
+      const latestChecks = await this.prisma.monitorCheck.findMany({
+        where: { monitorId: { in: activeIds } },
+        orderBy: [{ monitorId: 'asc' }, { timestamp: 'desc' }],
+        distinct: ['monitorId'],
+        select: { isUp: true },
+      });
+      for (const check of latestChecks) {
+        if (check.isUp) up++;
+        else down++;
+      }
+    }
+
+    // Distinct from `down` above on purpose — a monitor's latest check can
+    // flip to failed on the very first attempt, before checks.service.ts's
+    // retry-then-confirm state machine has actually opened an Incident.
+    // This is what the "N monitors are currently down" banner uses instead,
+    // matching every other confirmed-down signal in the app
+    // (`hasOpenIncident` on the list, the Incidents page).
+    const openIncidents = await this.prisma.monitor.count({
+      where: { deletedAt: null, isPaused: false, incidents: { some: { endedAt: null } } },
     });
-    return this.enrich(monitors);
+
+    // The single oldest still-open Incident (among active monitors) — i.e.
+    // whichever outage has been running longest right now. `sortBy
+    // startedAt asc` + take 1 is enough; the frontend computes the live
+    // duration itself (now - startedAt) rather than a snapshot age that
+    // goes stale between polls.
+    const longestOpenIncidentRow = await this.prisma.incident.findFirst({
+      where: { endedAt: null, monitor: { isPaused: false, deletedAt: null } },
+      orderBy: { startedAt: 'asc' },
+      select: { startedAt: true, monitor: { select: { id: true, domain: true, label: true } } },
+    });
+    const longestOpenIncident = longestOpenIncidentRow
+      ? {
+          monitorId: longestOpenIncidentRow.monitor.id,
+          domain: longestOpenIncidentRow.monitor.domain,
+          label: longestOpenIncidentRow.monitor.label,
+          startedAt: longestOpenIncidentRow.startedAt,
+        }
+      : null;
+
+    return { total, paused, up, down, openIncidents, longestOpenIncident };
+  }
+
+  /** Enqueues a one-off check for every active (non-paused) monitor — the bulk version of `checkNow`, so the client never needs every monitor's id loaded to trigger this. */
+  async checkAll(): Promise<{ queued: number }> {
+    const monitors = await this.prisma.monitor.findMany({
+      where: { deletedAt: null, isPaused: false },
+      select: { id: true, domain: true },
+    });
+    await Promise.all(
+      monitors.map((m) =>
+        this.monitorChecksQueue.add(MONITOR_CHECK_JOB_NAME, { monitorId: m.id, domain: m.domain }, { priority: 1 }),
+      ),
+    );
+    return { queued: monitors.length };
   }
 
   async findOneWithStatus(id: string) {
@@ -116,19 +246,39 @@ export class MonitorsService {
 
       const history = monitorChecks.map((c) => (c.isUp ? 'up' : 'down'));
 
+      // Clamp the window's start when the monitor is younger than 24h —
+      // otherwise a monitor added 1 minute ago and down that entire minute
+      // divides its downtime by the full 24h window and shows ~99.9%
+      // ("healthy") instead of the 0% it actually deserves. Clamped to its
+      // *first observed check*, not raw `createdAt`: the gap between
+      // registration and that first check (scheduling jitter, plus the
+      // "retry once before confirming down" delay) was never actually
+      // verified up — counting it as uptime is exactly how a monitor
+      // checked exactly once, and down on that one check, still showed a
+      // small nonzero uptime% instead of ~0%.
+      //
+      // Only clamped forward for a monitor younger than the window itself —
+      // an established monitor keeps the full `windowStart` as before,
+      // since `monitorChecks` here is capped to the newest 30 fetched and
+      // can't be trusted to say "checking started here" for one with far
+      // more history than that.
+      const effectiveWindowStart =
+        monitor.createdAt > windowStart ? (monitorChecks[0]?.timestamp ?? monitor.createdAt) : windowStart;
+      const windowMs = now - effectiveWindowStart.getTime();
+
       const monitorIncidents = incidentsByMonitor.get(monitor.id) ?? [];
       let downtimeMs = 0;
       for (const incident of monitorIncidents) {
-        const start = incident.startedAt > windowStart ? incident.startedAt : windowStart;
+        const start = incident.startedAt > effectiveWindowStart ? incident.startedAt : effectiveWindowStart;
         const end = incident.endedAt ?? new Date(now);
         if (end.getTime() > start.getTime()) {
           downtimeMs += end.getTime() - start.getTime();
         }
       }
       const uptime24h =
-        monitorChecks.length === 0
+        monitorChecks.length === 0 || windowMs <= 0
           ? null
-          : Math.round(((UPTIME_WINDOW_MS - Math.min(downtimeMs, UPTIME_WINDOW_MS)) / UPTIME_WINDOW_MS) * 1000) / 10;
+          : Math.round(((windowMs - Math.min(downtimeMs, windowMs)) / windowMs) * 1000) / 10;
 
       return {
         ...monitor,

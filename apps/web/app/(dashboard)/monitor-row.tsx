@@ -14,7 +14,7 @@ import {
   type HistoryStatus,
 } from '@uptime/ui';
 import { apiFetch } from '../../lib/api-client';
-import { timeAgo, responseTimeClass, uptimeColorClass, stripProtocol } from '../../lib/format';
+import { timeAgo, responseTimeClass, formatResponseTime, uptimeColorClass, stripProtocol } from '../../lib/format';
 import { monitorStatus, type MonitorWithStatus } from '../../lib/types';
 
 const HISTORY_SIZE = 30;
@@ -54,6 +54,15 @@ function EditIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
       <path d="M17 3a2.83 2.83 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+function ExternalLinkIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
     </svg>
   );
 }
@@ -120,7 +129,16 @@ export function MonitorRow({
       </td>
       <td className="px-5 py-2.5">
         <div className="text-[13.5px] font-medium text-text">{monitor.label || urlShort}</div>
-        <div className="font-mono text-xs text-text-muted">{urlShort}</div>
+        <a
+          href={`https://${monitor.domain}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={`Open https://${monitor.domain} in a new tab`}
+          className="inline-flex items-center gap-1 font-mono text-xs text-text-muted hover:text-accent hover:underline"
+        >
+          {urlShort}
+          <ExternalLinkIcon />
+        </a>
       </td>
       <td className="px-5 py-2.5">
         <Badge status={status} label={STATUS_LABEL[status]} />
@@ -129,7 +147,7 @@ export function MonitorRow({
         {rt === null ? (
           <span className="text-text-subtle">—</span>
         ) : (
-          <span className={`font-mono text-[12.5px] ${responseTimeClass(rt)}`}>{rt}ms</span>
+          <span className={`font-mono text-[12.5px] ${responseTimeClass(rt)}`}>{formatResponseTime(rt)}</span>
         )}
       </td>
       <td className="px-5 py-2.5">

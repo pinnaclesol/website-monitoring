@@ -8,11 +8,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { MonitorsService } from './monitors.service';
 import { CreateMonitorDto } from './dto/create-monitor.dto';
 import { UpdateMonitorDto } from './dto/update-monitor.dto';
+import { ListMonitorsQueryDto } from './dto/list-monitors-query.dto';
 
 @Controller('monitors')
 export class MonitorsController {
@@ -20,8 +22,15 @@ export class MonitorsController {
 
   @Get()
   @RequirePermission('monitors:view')
-  findAll() {
-    return this.monitorsService.findAll();
+  findAll(@Query() query: ListMonitorsQueryDto) {
+    return this.monitorsService.findAll(query);
+  }
+
+  // Must come before `@Get(':id')` — otherwise Nest matches "stats" as an :id.
+  @Get('stats')
+  @RequirePermission('monitors:view')
+  stats() {
+    return this.monitorsService.computeStats();
   }
 
   @Get(':id')
@@ -35,6 +44,14 @@ export class MonitorsController {
   @RequirePermission('monitors:create')
   create(@Body() dto: CreateMonitorDto) {
     return this.monitorsService.create(dto);
+  }
+
+  // Must come before `@Post(':id/...')` for the same reason as `stats` above.
+  @Post('check-all')
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission('monitors:update')
+  checkAll() {
+    return this.monitorsService.checkAll();
   }
 
   @Patch(':id')

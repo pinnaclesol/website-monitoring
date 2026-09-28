@@ -29,12 +29,49 @@ export function monitorStatus(monitor: MonitorWithStatus): MonitorStatus {
   return monitor.latestCheck.isUp ? 'up' : 'down';
 }
 
+/** `GET /api/monitors` — server-side paginated; `data` is only the current page. */
+export interface MonitorListResponse {
+  data: MonitorWithStatus[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * `GET /api/monitors/stats` — dashboard-wide stat-card figures computed
+ * across every monitor, independent of the paginated list's current
+ * page/search/status filter. See apps/api's `MonitorsService.computeStats()`
+ * for why `down` and `openIncidents` are deliberately different counts.
+ */
+export interface MonitorStats {
+  total: number;
+  paused: number;
+  up: number;
+  down: number;
+  openIncidents: number;
+  /** Whichever active monitor's outage has been running longest right now — `null` when nothing is currently down. */
+  longestOpenIncident: {
+    monitorId: string;
+    domain: string;
+    label: string | null;
+    startedAt: string;
+  } | null;
+}
+
 export interface IncidentWithMonitor {
   id: string;
   monitorId: string;
   startedAt: string;
   endedAt: string | null;
   monitor: { id: string; domain: string; label: string | null };
+}
+
+/** `GET /api/incidents` — server-side paginated; `data` is only the current page. */
+export interface IncidentListResponse {
+  data: IncidentWithMonitor[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface AlertSettings {
