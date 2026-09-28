@@ -1,0 +1,63 @@
+# syntax=docker/dockerfile:1
+
+FROM node:24-bookworm-slim AS deps
+WORKDIR /app
+
+# apps/web never imports @uptime/uptime-db, so unlike Dockerfile.api/worker
+# this stage doesn't need a generated Prisma client at all — `--ignore-
+# scripts` skips the root package.json's `postinstall` (which would
+# otherwise fail here anyway, since the schema file is never copied into
+# this Dockerfile — nothing in apps/web needs it).
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+
+RUN npm ci --ignore-scripts
+
+
+FROM deps AS dev
+# No source COPY — bind-mounted at container-run time (see
+# docker-compose.dev.yml), with an anonymous volume on node_modules so this
+# stage's own Linux-built node_modules aren't overwritten by the host's
+# Windows ones. `nx dev web` mirrors what `npm run dev:web` already runs
+# today (Next's own dev server under the hood — no @uptime/*-bundling
+# concern here the way apps/api/worker have, Next's bundler resolves
+# workspace path aliases on its own).
+CMD ["npx", "nx", "dev", "web"]
+
+
+FROM deps AS build
+COPY . .
+RUN npx nx build web
+
+
+FROM node:24-bookworm-slim AS production
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Fresh prod-only install (not copied from the `deps`/`build` stages, which
+# have full devDependencies) — same reasoning as Dockerfile.api/worker's
+# production stage.
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY libs/auth/package.json libs/auth/package.json
+COPY libs/queue/package.json libs/queue/package.json
+COPY libs/ui/package.json libs/ui/package.json
+COPY libs/uptime-db/package.json libs/uptime-db/package.json
+RUN npm ci --omit=dev --ignore-scripts
+
+COPY --from=build /app/apps/web/.next ./apps/web/.next
+COPY --from=build /app/apps/web/public ./apps/web/public
+COPY --from=build /app/apps/web/next.config.js ./apps/web/next.config.js
+COPY --from=build /app/apps/web/package.json ./apps/web/package.json
+
+WORKDIR /app/apps/web
+EXPOSE 4000
+CMD ["npx", "next", "start", "-p", "4000"]
