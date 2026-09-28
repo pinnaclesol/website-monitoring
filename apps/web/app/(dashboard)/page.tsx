@@ -29,6 +29,7 @@ import { stripProtocol } from '../../lib/format';
 import { MonitorRow } from './monitor-row';
 import { MonitorModal } from './monitor-modal';
 import { useSiteName } from './site-name-context';
+import { PermissionGate } from './permission-gate';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -83,10 +84,10 @@ function RefreshIcon() {
 export default function DashboardPage() {
   const siteName = useSiteName();
   const { data: session } = useSession();
-  const role = session?.user.role;
-  const canCreate = !!role && hasPermission(role, 'monitors:create');
-  const canUpdate = !!role && hasPermission(role, 'monitors:update');
-  const canDelete = !!role && hasPermission(role, 'monitors:delete');
+  const permissions = session?.user.permissions;
+  const canCreate = !!permissions && hasPermission(permissions, 'monitors:create');
+  const canUpdate = !!permissions && hasPermission(permissions, 'monitors:update');
+  const canDelete = !!permissions && hasPermission(permissions, 'monitors:delete');
   const [monitors, setMonitors] = useState<MonitorWithStatus[] | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -209,7 +210,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <>
+    <PermissionGate permission="monitors:view">
       <Topbar
         actions={
           <>
@@ -405,6 +406,6 @@ export default function DashboardPage() {
         description={`Remove "${deleteTarget?.label || (deleteTarget ? stripProtocol(deleteTarget.domain) : '')}"? All check history will be deleted.`}
         confirmLabel="Remove"
       />
-    </>
+    </PermissionGate>
   );
 }

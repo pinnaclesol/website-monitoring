@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
   if (!session) {
     return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
   }
-  if (!hasPermission(session.user.role, 'settings:update')) {
+  if (!hasPermission(session.user.permissions, 'settings:update')) {
     return NextResponse.json({ message: 'Forbidden' }, { status: 403 });
   }
 

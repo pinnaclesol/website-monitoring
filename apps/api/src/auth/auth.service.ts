@@ -17,6 +17,7 @@ export class AuthService {
   async validate(dto: ValidateUserDto): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({
       where: { username: dto.username },
+      include: { roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } } },
     });
 
     if (!user || !user.active) {
@@ -28,6 +29,16 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    return { id: user.id, username: user.username, name: user.name, role: user.role };
+    const roles = user.roles.map((ru) => ({ id: ru.role.id, name: ru.role.name }));
+
+    // Any held role being `isSystem` (the seeded Admin role, or any future
+    // one) bypasses per-permission checks entirely — same reasoning as the
+    // old fixed ADMIN: 'ALL' bypass, now generalized to any isSystem role.
+    const isSystemBypass = user.roles.some((ru) => ru.role.isSystem);
+    const permissions = isSystemBypass
+      ? (await this.prisma.permission.findMany({ select: { key: true } })).map((p) => p.key)
+      : [...new Set(user.roles.flatMap((ru) => ru.role.permissions.map((rp) => rp.permission.key)))];
+
+    return { id: user.id, username: user.username, name: user.name, roles, permissions };
   }
 }

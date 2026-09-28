@@ -1,7 +1,4 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import type { Role } from '@uptime/auth';
-
-const ROLES: Role[] = ['ADMIN', 'EDITOR', 'VIEWER'];
+import { ArrayUnique, IsArray, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
@@ -22,6 +19,9 @@ export class CreateUserDto {
   @MaxLength(72)
   password!: string;
 
-  @IsIn(ROLES)
-  role!: Role;
+  /** `Role.id` values to assign — a user can hold any number of roles; effective permissions are their union. */
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  roleIds!: string[];
 }

@@ -17,7 +17,7 @@
     "build": "nx run-many --target=build --all",
     "lint": "nx run-many --target=lint --all",
     "typecheck": "nx run-many --target=typecheck --all",
-    "test": "nx run-many --target=test --all",
+    "test": "jest",
     "uptime:generate": "npm run --prefix libs/uptime-db generate",
     "uptime:migrate": "npm run --prefix libs/uptime-db migrate",
     "uptime:studio": "npm run --prefix libs/uptime-db studio",
@@ -36,6 +36,7 @@
     "@nx/workspace": "23.2.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/express": "5.0.6",
+    "@types/jest": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
@@ -44,10 +45,12 @@
     "eslint": "10.11.0",
     "eslint-config-prettier": "^10.0.0",
     "eslint-plugin-prettier": "^5.0.0",
+    "jest": "^30.5.2",
     "nx": "23.2.1",
     "prettier": "^3.0.0",
-    "tsx": "4.23.15",
+    "ts-jest": "^29.4.13",
     "tslib": "^2.3.0",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "typescript-eslint": "8.70.1",
     "webpack": "5.111.1",
@@ -66,6 +69,7 @@
     "@radix-ui/react-select": "2.3.7",
     "@radix-ui/react-slot": "^1.1.0",
     "@radix-ui/react-tabs": "1.1.21",
+    "@tailwindcss/postcss": "4.3.3",
     "bcryptjs": "3.0.3",
     "bullmq": "6.3.8",
     "class-transformer": "0.5.1",
@@ -81,8 +85,7 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "tailwind-merge": "^2.5.5",
-    "tailwindcss": "4.3.3",
-    "@tailwindcss/postcss": "4.3.3"
+    "tailwindcss": "4.3.3"
   },
   "overrides": {
     "nodemailer": "10.0.10"

@@ -6,22 +6,10 @@ import {
   Button,
   Input,
   Toggle,
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
   useToast,
 } from '@uptime/ui';
-import type { Role } from '@uptime/auth';
 import { apiFetch } from '../../../lib/api-client';
-import type { UserRecord } from '../../../lib/types';
-
-const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: 'ADMIN', label: 'Admin' },
-  { value: 'EDITOR', label: 'Editor' },
-  { value: 'VIEWER', label: 'Viewer' },
-];
+import type { RoleRecord, UserRecord } from '../../../lib/types';
 
 // Mirrors apps/api's CreateUserDto/UpdateUserDto password validators
 // (MinLength(8), MaxLength(72) — bcrypt silently truncates beyond 72 bytes).
@@ -62,18 +50,30 @@ export function UserModal({
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<Role>('VIEWER');
+  const [roles, setRoles] = useState<RoleRecord[]>([]);
+  const [roleIds, setRoleIds] = useState<string[]>([]);
   const [active, setActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    apiFetch<RoleRecord[]>('roles')
+      .then(setRoles)
+      .catch(() => setRoles([]));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     setName(editingUser?.name ?? '');
     setUsername(editingUser?.username ?? '');
     setPassword('');
-    setRole(editingUser?.role ?? 'VIEWER');
+    setRoleIds(editingUser?.roles.map((r) => r.id) ?? []);
     setActive(editingUser?.active ?? true);
   }, [open, editingUser]);
+
+  function toggleRole(roleId: string, checked: boolean) {
+    setRoleIds((prev) => (checked ? [...prev, roleId] : prev.filter((id) => id !== roleId)));
+  }
 
   // Empty password in edit mode means "keep current" — only validate length
   // once something's been typed. In create mode it's always required.
@@ -94,11 +94,15 @@ export function UserModal({
       toast({ type: 'error', title: `Password must be ${PASSWORD_MIN}–${PASSWORD_MAX} characters` });
       return;
     }
+    if (roleIds.length === 0) {
+      toast({ type: 'error', title: 'Select at least one role' });
+      return;
+    }
 
     setSubmitting(true);
     try {
       if (isEdit) {
-        const body: Record<string, unknown> = { username: username.trim(), name: name.trim() || null, role, active };
+        const body: Record<string, unknown> = { username: username.trim(), name: name.trim() || null, roleIds, active };
         if (password.trim()) body.password = password.trim();
         await apiFetch<UserRecord>(`users/${editingUser!.id}`, {
           method: 'PATCH',
@@ -108,7 +112,7 @@ export function UserModal({
       } else {
         await apiFetch<UserRecord>('users', {
           method: 'POST',
-          body: JSON.stringify({ username: username.trim(), name: name.trim() || undefined, password: password.trim(), role }),
+          body: JSON.stringify({ username: username.trim(), name: name.trim() || undefined, password: password.trim(), roleIds }),
         });
         toast({ type: 'success', title: 'User added', message: name.trim() || username.trim() });
       }
@@ -139,7 +143,7 @@ export function UserModal({
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={submitting || !username.trim() || !passwordValid}
+            disabled={submitting || !username.trim() || !passwordValid || roleIds.length === 0}
           >
             {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add user'}
           </Button>
@@ -199,19 +203,27 @@ export function UserModal({
         </div>
       </div>
       <div className="mb-3.5">
-        <label className="mb-1.5 block text-[13px] font-medium text-text">Role</label>
-        <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {ROLE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
+        <label className="mb-1.5 block text-[13px] font-medium text-text">
+          Roles <span className="text-red">*</span>
+        </label>
+        {roles.length === 0 ? (
+          <div className="text-xs text-text-subtle">Loading roles…</div>
+        ) : (
+          <div className="max-h-40 space-y-1.5 overflow-y-auto rounded-md border border-border p-2.5">
+            {roles.map((r) => (
+              <label key={r.id} className="flex cursor-pointer items-center gap-2 text-[13px] text-text">
+                <input
+                  type="checkbox"
+                  checked={roleIds.includes(r.id)}
+                  onChange={(e) => toggleRole(r.id, e.target.checked)}
+                  className="size-3.5 accent-accent"
+                />
+                {r.name}
+                {r.description ? <span className="text-xs text-text-subtle">— {r.description}</span> : null}
+              </label>
             ))}
-          </SelectContent>
-        </Select>
+          </div>
+        )}
       </div>
       {isEdit ? (
         <div>

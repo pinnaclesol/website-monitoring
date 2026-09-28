@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
+import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 import { getBrandingSettings } from '../lib/branding-settings';
@@ -23,7 +24,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * Applies the saved theme to <html> before paint, so there's no flash of the
  * wrong theme on load. Runs as an inline script (not a React effect) because
  * effects only run after the first paint — too late to prevent the flash.
- * Static, non-interpolated string — safe to inline.
+ * Static, non-interpolated string — safe to inline. Uses next/script's
+ * `beforeInteractive` strategy (not a raw <script> tag) so Next.js injects
+ * and executes it directly rather than routing it through React's normal
+ * client-render diffing, which never executes plain <script> elements.
  */
 const THEME_INIT_SCRIPT = `
   try {
@@ -38,7 +42,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <Script id="theme-init" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body>
         <Providers>{children}</Providers>

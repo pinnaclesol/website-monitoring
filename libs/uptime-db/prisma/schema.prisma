@@ -25,36 +25,95 @@ datasource db {
 }
 
 /// No sign-up route — the first user is seeded via `npm run uptime:seed`,
-/// further users are created from the `/users` view. Fixed 3-role RBAC
-/// (ADMIN/EDITOR/VIEWER) — see `@uptime/auth`'s `hasPermission`. `role:
-/// ADMIN` is an implicit super-admin for *permissions* (bypasses every
-/// `hasPermission` check). `isProtected` is a separate, narrower concept: it
-/// marks the one bootstrap account (always the env-seeded user) as
-/// immutable through the Users CRUD API entirely — not editable or
+/// further users are created from the `/users` view. Fully flexible RBAC:
+/// a user can hold any number of `Role`s (via `RoleUser`), and their
+/// effective permissions are the union of every role they hold — see
+/// `@uptime/auth`'s `hasPermission`. `isProtected` is a separate, narrower
+/// concept: it marks the one bootstrap account (always the env-seeded user)
+/// as immutable through the Users CRUD API entirely — not editable or
 /// deletable by anyone, including itself — so there's always a guaranteed
 /// way back in via the seed script even if every other admin is
 /// locked/removed.
 model User {
-  id          String   @id @default(cuid())
-  username    String   @unique // login handle — not shown in the UI beyond the Users list
+  id          String     @id @default(cuid())
+  username    String     @unique // login handle — not shown in the UI beyond the Users list
   name        String? // display name shown in the sidebar/UI; falls back to username if unset
   password    String // bcrypt hash — never log or return in API responses
-  role        Role     @default(VIEWER)
-  isProtected Boolean  @default(false)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  roles       RoleUser[]
+  isProtected Boolean    @default(false)
+  active      Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   @@map("User")
 }
 
-/// Fixed set of roles driving `@uptime/auth`'s `hasPermission`. ADMIN is an
-/// implicit super-admin (bypasses per-permission checks); EDITOR/VIEWER are
-/// checked against an explicit permission table.
-enum Role {
-  ADMIN
-  EDITOR
-  VIEWER
+/// A dynamic, admin-creatable role — a named bundle of `Permission`s,
+/// assignable to any number of `User`s. `isSystem` is true only for the one
+/// seeded "Admin" role: it can't be renamed, its permissions can't be
+/// edited, it can't be deleted, and it implicitly has every permission
+/// (bypasses `RolePermission` rows entirely) — same "guaranteed way back
+/// in" principle as `User.isProtected`, so a newly added `Permission` never
+/// silently fails to apply to Admins just because nobody remembered to
+/// assign it.
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       RoleUser[]
+  permissions RolePermission[]
+
+  @@map("Role")
+}
+
+/// Many-to-many User<->Role join — a user can hold several roles at once;
+/// effective permissions are the union of all of them.
+model RoleUser {
+  id     String @id @default(cuid())
+  roleId String
+  userId String
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, userId])
+  @@map("RoleUser")
+}
+
+/// The fixed catalog of enforcement points — one row per string ever passed
+/// to `@RequirePermission(...)`/`hasPermission(...)`. Seeded once (see
+/// `libs/uptime-db/src/seed.ts`), never created through the UI: adding a
+/// genuinely new permission always requires a code change to add the
+/// enforcement point itself, dynamic roles or not. `resource`/`action`
+/// group the Roles page's checkbox grid (e.g. resource="monitors",
+/// action="create") — that grid is built from this table, not hardcoded, so
+/// a newly seeded permission shows up with no frontend change.
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique
+  resource    String
+  action      String
+  description String?
+
+  roles RolePermission[]
+
+  @@map("Permission")
+}
+
+model RolePermission {
+  id           String @id @default(cuid())
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("RolePermission")
 }
 
 /// A monitored URL/domain — the core entity of the app. Soft-deleted via

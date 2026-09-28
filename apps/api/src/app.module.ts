@@ -10,6 +10,7 @@ import { ChecksModule } from './checks/checks.module';
 import { IncidentsModule } from './incidents/incidents.module';
 import { SettingsModule } from './settings/settings.module';
 import { UsersModule } from './users/users.module';
+import { RolesModule } from './roles/roles.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { UsersModule } from './users/users.module';
     IncidentsModule,
     SettingsModule,
     UsersModule,
+    RolesModule,
   ],
   providers: [
     {

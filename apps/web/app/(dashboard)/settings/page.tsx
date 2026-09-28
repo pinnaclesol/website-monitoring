@@ -23,6 +23,7 @@ import {
 } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
 import type { BrandingSettings } from '../../../lib/branding-settings';
+import { PermissionGate } from '../permission-gate';
 import type { MonitoringSettings } from '../../../lib/types';
 import { useSiteName, useBranding } from '../site-name-context';
 
@@ -92,7 +93,7 @@ export default function SettingsPage() {
   const toast = useToast();
   const router = useRouter();
   const { data: session } = useSession();
-  const canUpdate = !!session?.user.role && hasPermission(session.user.role, 'settings:update');
+  const canUpdate = !!session?.user.permissions && hasPermission(session.user.permissions, 'settings:update');
 
   const [brandingSettings, setBrandingSettings] = useState<BrandingSettings | null>(null);
   const [appName, setAppName] = useState('');
@@ -216,7 +217,7 @@ export default function SettingsPage() {
   const intervalValid = intervalError === null;
 
   return (
-    <>
+    <PermissionGate permission="settings:view">
       <Topbar>
         <Breadcrumb section={breadcrumbSiteName} page="Settings" />
       </Topbar>
@@ -344,6 +345,6 @@ export default function SettingsPage() {
           )}
         </Card>
       </div>
-    </>
+    </PermissionGate>
   );
 }

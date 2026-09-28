@@ -14,30 +14,49 @@ const SAFE_USER_SELECT = {
   id: true,
   username: true,
   name: true,
-  role: true,
   isProtected: true,
   active: true,
   createdAt: true,
   updatedAt: true,
+  roles: { select: { role: { select: { id: true, name: true } } } },
 } as const;
+
+type RawUser = {
+  roles: { role: { id: string; name: string } }[];
+  [key: string]: unknown;
+};
+
+/** Flattens the RoleUser wrapper shape into a plain `roles: [{id,name}]` array for the API response. */
+function toApiUser<T extends RawUser>(user: T) {
+  const { roles, ...rest } = user;
+  return { ...rest, roles: roles.map((ru) => ru.role) };
+}
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: UptimePrismaService) {}
 
-  findAll() {
-    return this.prisma.user.findMany({
+  async findAll() {
+    const users = await this.prisma.user.findMany({
       select: SAFE_USER_SELECT,
       orderBy: { createdAt: 'desc' },
     });
+    return users.map(toApiUser);
   }
 
   async create(dto: CreateUserDto) {
+    await this.assertRoleIdsValid(dto.roleIds);
     const hashedPassword = await bcrypt.hash(dto.password, SALT_ROUNDS);
-    return this.prisma.user.create({
-      data: { username: dto.username, name: dto.name, password: hashedPassword, role: dto.role },
+    const user = await this.prisma.user.create({
+      data: {
+        username: dto.username,
+        name: dto.name,
+        password: hashedPassword,
+        roles: { create: dto.roleIds.map((roleId) => ({ roleId })) },
+      },
       select: SAFE_USER_SELECT,
     });
+    return toApiUser(user);
   }
 
   async update(id: string, dto: UpdateUserDto, requestingUserId: string) {
@@ -50,50 +69,57 @@ export class UsersService {
       throw new BadRequestException('The default admin account cannot be modified');
     }
 
+    const existingRoleIds = existing.roles.map((r) => r.roleId).sort();
+    const newRoleIds = dto.roleIds !== undefined ? [...dto.roleIds].sort() : undefined;
+    const roleIdsChanged = newRoleIds !== undefined && JSON.stringify(newRoleIds) !== JSON.stringify(existingRoleIds);
+
     // Compare against the *current* value, not just presence — the frontend
-    // always sends `role`/`active` on every edit (even unchanged), so a
+    // always sends `roleIds`/`active` on every edit (even unchanged), so a
     // presence-only check would block a user from editing their own
     // username/password too.
     if (id === requestingUserId) {
-      if (dto.role !== undefined && dto.role !== existing.role) {
-        throw new BadRequestException('You cannot change your own role');
+      if (roleIdsChanged) {
+        throw new BadRequestException('You cannot change your own roles');
       }
       if (dto.active !== undefined && dto.active !== existing.active) {
         throw new BadRequestException('You cannot change your own active status');
       }
     }
 
-    const removesActiveAdmin =
-      existing.role === 'ADMIN' &&
-      existing.active &&
-      ((dto.role !== undefined && dto.role !== 'ADMIN') || dto.active === false);
-
-    if (removesActiveAdmin) {
-      await this.assertNotLastActiveAdmin();
+    if (dto.roleIds !== undefined) {
+      await this.assertRoleIdsValid(dto.roleIds);
     }
 
-    const data: {
-      username?: string;
-      name?: string | null;
-      password?: string;
-      role?: UpdateUserDto['role'];
-      active?: boolean;
-    } = {
-      username: dto.username,
-      name: dto.name,
-      role: dto.role,
-      active: dto.active,
-    };
+    const willBeActive = dto.active ?? existing.active;
+    const willHoldSystemRole = dto.roleIds !== undefined ? await this.anyIsSystem(dto.roleIds) : existing.isSystemHolder;
+    const removesActiveSystemHolder = existing.isSystemHolder && existing.active && (!willHoldSystemRole || !willBeActive);
 
-    if (dto.password) {
-      data.password = await bcrypt.hash(dto.password, SALT_ROUNDS);
+    if (removesActiveSystemHolder) {
+      await this.assertNotLastActiveSystemHolder();
     }
 
-    return this.prisma.user.update({
-      where: { id },
-      data,
-      select: SAFE_USER_SELECT,
+    const hashedPassword = dto.password ? await bcrypt.hash(dto.password, SALT_ROUNDS) : undefined;
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      if (dto.roleIds !== undefined) {
+        await tx.roleUser.deleteMany({ where: { userId: id } });
+        if (dto.roleIds.length > 0) {
+          await tx.roleUser.createMany({ data: dto.roleIds.map((roleId) => ({ userId: id, roleId })) });
+        }
+      }
+      return tx.user.update({
+        where: { id },
+        data: {
+          username: dto.username,
+          name: dto.name,
+          active: dto.active,
+          ...(hashedPassword ? { password: hashedPassword } : {}),
+        },
+        select: SAFE_USER_SELECT,
+      });
     });
+
+    return toApiUser(user);
   }
 
   async remove(id: string, requestingUserId: string): Promise<void> {
@@ -107,8 +133,8 @@ export class UsersService {
       throw new BadRequestException('The default admin account cannot be deleted');
     }
 
-    if (existing.role === 'ADMIN' && existing.active) {
-      await this.assertNotLastActiveAdmin();
+    if (existing.isSystemHolder && existing.active) {
+      await this.assertNotLastActiveSystemHolder();
     }
 
     await this.prisma.user.delete({ where: { id } });
@@ -117,20 +143,39 @@ export class UsersService {
   private async findExisting(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      select: { id: true, role: true, active: true, isProtected: true },
+      select: {
+        id: true,
+        active: true,
+        isProtected: true,
+        roles: { select: { roleId: true, role: { select: { isSystem: true } } } },
+      },
     });
     if (!user) {
       throw new NotFoundException(`User ${id} not found`);
     }
-    return user;
+    return { ...user, isSystemHolder: user.roles.some((r) => r.role.isSystem) };
   }
 
-  /** Guards the "at least one active Admin" invariant before a demotion, deactivation, or delete. */
-  private async assertNotLastActiveAdmin(): Promise<void> {
-    const activeAdminCount = await this.prisma.user.count({
-      where: { role: 'ADMIN', active: true },
+  private async assertRoleIdsValid(roleIds: string[]): Promise<void> {
+    if (roleIds.length === 0) return;
+    const count = await this.prisma.role.count({ where: { id: { in: roleIds } } });
+    if (count !== roleIds.length) {
+      throw new BadRequestException('One or more roleIds are invalid');
+    }
+  }
+
+  private async anyIsSystem(roleIds: string[]): Promise<boolean> {
+    if (roleIds.length === 0) return false;
+    const count = await this.prisma.role.count({ where: { id: { in: roleIds }, isSystem: true } });
+    return count > 0;
+  }
+
+  /** Guards the "at least one active user holding an isSystem role" invariant before a role removal, deactivation, or delete. */
+  private async assertNotLastActiveSystemHolder(): Promise<void> {
+    const activeSystemHolderCount = await this.prisma.user.count({
+      where: { active: true, roles: { some: { role: { isSystem: true } } } },
     });
-    if (activeAdminCount <= 1) {
+    if (activeSystemHolderCount <= 1) {
       throw new BadRequestException('Cannot remove the last active Admin');
     }
   }

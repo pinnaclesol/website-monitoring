@@ -10,8 +10,10 @@ import { SKIP_PERMISSION_CHECK_KEY } from '../decorators/skip-permission-check.d
 /**
  * Global guard: runs after `InternalApiKeyGuard`. Where that guard validates
  * the one shared system secret, this one identifies *which* user is calling
- * and enforces per-route `@RequirePermission(...)` checks against the fixed
- * ADMIN/EDITOR/VIEWER role table in `@uptime/auth`.
+ * and enforces per-route `@RequirePermission(...)` checks against that
+ * user's *effective* permissions — the union of every `Role` they hold via
+ * `RoleUser`, resolved fresh from the DB on every request (never cached),
+ * with any held `isSystem` role short-circuiting to every permission.
  *
  * apps/web's proxy attaches `x-user-id` (the session user's id) to every
  * forwarded request except the one `@Public()` route (`POST
@@ -59,7 +61,11 @@ export class PermissionGuard implements CanActivate {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, role: true, active: true },
+      select: {
+        id: true,
+        active: true,
+        roles: { select: { role: { select: { isSystem: true, permissions: { select: { permission: { select: { key: true } } } } } } } },
+      },
     });
 
     if (!user || !user.active) {
@@ -75,7 +81,12 @@ export class PermissionGuard implements CanActivate {
       return true;
     }
 
-    if (!hasPermission(user.role, requiredPermission)) {
+    const isSystemBypass = user.roles.some((ru) => ru.role.isSystem);
+    const permissions = isSystemBypass
+      ? [requiredPermission] // bypass — no need to fetch the full catalog just to prove membership
+      : user.roles.flatMap((ru) => ru.role.permissions.map((rp) => rp.permission.key));
+
+    if (!hasPermission(permissions, requiredPermission)) {
       throw new ForbiddenException(`Missing required permission: ${requiredPermission}`);
     }
 

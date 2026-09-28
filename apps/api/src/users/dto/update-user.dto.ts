@@ -1,7 +1,4 @@
-import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import type { Role } from '@uptime/auth';
-
-const ROLES: Role[] = ['ADMIN', 'EDITOR', 'VIEWER'];
+import { ArrayUnique, IsArray, IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class UpdateUserDto {
   @IsOptional()
@@ -26,9 +23,12 @@ export class UpdateUserDto {
   @MaxLength(72)
   password?: string;
 
+  /** When provided, replaces the user's entire role set (not a diff/patch) — see create-user.dto.ts. */
   @IsOptional()
-  @IsIn(ROLES)
-  role?: Role;
+  @IsArray()
+  @IsString({ each: true })
+  @ArrayUnique()
+  roleIds?: string[];
 
   @IsOptional()
   @IsBoolean()

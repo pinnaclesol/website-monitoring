@@ -1,4 +1,4 @@
-import type { Role } from '@uptime/auth';
+import type { RoleSummary } from '@uptime/auth';
 
 /** Mirrors apps/api's enriched GET /api/monitors response shape (monitors.service.ts's `enrich()`). */
 export interface MonitorWithStatus {
@@ -85,10 +85,37 @@ export interface UserRecord {
   id: string;
   username: string;
   name: string | null;
-  role: Role;
+  /** Every role this user holds — effective permissions are their union. */
+  roles: RoleSummary[];
   /** The one bootstrap admin account — immutable via this API, by anyone. */
   isProtected: boolean;
   active: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One row from the fixed permission catalog (`GET /api/permissions`) — groups the Roles page's checkbox grid. */
+export interface PermissionRecord {
+  id: string;
+  key: string;
+  resource: string;
+  action: string;
+  description: string | null;
+}
+
+/** Mirrors apps/api's `roles` resource response shape. */
+export interface RoleRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  /** True only for the seeded Admin role — cannot be renamed, have its permissions edited, or be deleted. */
+  isSystem: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count: { permissions: number; users: number };
+}
+
+/** `GET /api/roles/:id` — adds the actual assigned permission ids, for pre-checking the edit modal's grid. */
+export interface RoleDetail extends RoleRecord {
+  permissionIds: string[];
 }

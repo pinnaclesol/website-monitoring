@@ -19,7 +19,7 @@ export default async function DashboardLayout({ children }: { children: ReactNod
   return (
     <SiteNameProvider appName={appName} appLogoUrl={appLogoUrl}>
       <div className="min-h-screen bg-bg">
-        <DashboardNav username={session.user.username} name={session.user.name} role={session.user.role} />
+        <DashboardNav username={session.user.username} name={session.user.name} permissions={session.user.permissions} />
         <div className="ml-[248px] flex min-h-screen flex-col">{children}</div>
       </div>
     </SiteNameProvider>

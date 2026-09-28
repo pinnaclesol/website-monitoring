@@ -1,13 +1,14 @@
 import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import type { Role } from '@uptime/auth';
+import type { RoleSummary } from '@uptime/auth';
 
 /** Shape returned by apps/api's `POST /api/auth/validate` on success. */
 interface ValidateResponse {
   id: string;
   username: string;
   name: string | null;
-  role: Role;
+  roles: RoleSummary[];
+  permissions: string[];
 }
 
 /**
@@ -46,7 +47,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         const user: ValidateResponse = await res.json();
-        return { id: user.id, username: user.username, name: user.name, role: user.role };
+        return { id: user.id, username: user.username, name: user.name, roles: user.roles, permissions: user.permissions };
       },
     }),
   ],
@@ -56,7 +57,8 @@ export const authOptions: NextAuthOptions = {
         token.id = user.id;
         token.username = user.username;
         token.name = user.name;
-        token.role = user.role;
+        token.roles = user.roles;
+        token.permissions = user.permissions;
       }
       return token;
     },
@@ -65,7 +67,13 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.id;
         session.user.username = token.username;
         session.user.name = token.name;
-        session.user.role = token.role;
+        // Defaults guard a JWT cookie signed before this field existed (or
+        // any other malformed token) — without this, a stale session from
+        // before the RBAC rewrite crashes every gated page instead of
+        // degrading to "no permissions" (the caller can still redirect to
+        // /login on an empty/unexpected shape).
+        session.user.roles = token.roles ?? [];
+        session.user.permissions = token.permissions ?? [];
       }
       return session;
     },

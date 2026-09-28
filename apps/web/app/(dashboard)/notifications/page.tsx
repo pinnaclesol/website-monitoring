@@ -23,6 +23,7 @@ import {
 import { apiFetch } from '../../../lib/api-client';
 import type { TelegramAccount, SignalConfig, EmailRecipient, SmtpConfig, AlertSettings } from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
+import { PermissionGate } from '../permission-gate';
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   return <label className="mb-1.5 block text-[13px] font-medium text-text">{children}</label>;
@@ -45,7 +46,7 @@ export default function NotificationsPage() {
   const toast = useToast();
   const breadcrumbSiteName = useSiteName();
   const { data: session } = useSession();
-  const canUpdate = !!session?.user.role && hasPermission(session.user.role, 'notifications:update');
+  const canUpdate = !!session?.user.permissions && hasPermission(session.user.permissions, 'notifications:update');
 
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[] | null>(null);
   const [newTgLabel, setNewTgLabel] = useState('');
@@ -242,7 +243,7 @@ export default function NotificationsPage() {
   const loading = telegramAccounts === null || settings === null || (EMAIL_ENABLED && emailRecipients === null);
 
   return (
-    <>
+    <PermissionGate permission="notifications:view">
       <Topbar>
         <Breadcrumb section={breadcrumbSiteName} page="Notifications" />
       </Topbar>
@@ -481,6 +482,6 @@ export default function NotificationsPage() {
           )}
         </Card>
       </div>
-    </>
+    </PermissionGate>
   );
 }

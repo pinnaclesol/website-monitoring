@@ -6,6 +6,7 @@ import { apiFetch } from '../../../lib/api-client';
 import { stripProtocol } from '../../../lib/format';
 import type { IncidentWithMonitor } from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
+import { PermissionGate } from '../permission-gate';
 
 const POLL_INTERVAL_MS = 15000;
 
@@ -58,7 +59,7 @@ export default function IncidentsPage() {
   }, []);
 
   return (
-    <>
+    <PermissionGate permission="incidents:view">
       <Topbar>
         <Breadcrumb section={siteName} page="Incidents" />
       </Topbar>
@@ -119,6 +120,6 @@ export default function IncidentsPage() {
           )}
         </Card>
       </div>
-    </>
+    </PermissionGate>
   );
 }

@@ -1,25 +1,14 @@
 'use client';
 
 import { Badge, Toggle, Button, useToast } from '@uptime/ui';
-import type { Role } from '@uptime/auth';
 import { apiFetch } from '../../../lib/api-client';
 import type { UserRecord } from '../../../lib/types';
 
 // Badge only exposes the up/down/paused/checking status colors (see
 // libs/ui/src/components/ui/Badge.tsx) — reused here for role coloring
-// rather than inventing a new variant: blue (checking) reads as the
-// strong/accent tone for Admin, yellow (paused) as a neutral mid tone for
-// Editor, green (up) as the lightest/least-alarming tone for Viewer.
-const ROLE_BADGE_STATUS: Record<Role, 'checking' | 'paused' | 'up'> = {
-  ADMIN: 'checking',
-  EDITOR: 'paused',
-  VIEWER: 'up',
-};
-const ROLE_LABEL: Record<Role, string> = {
-  ADMIN: 'Admin',
-  EDITOR: 'Editor',
-  VIEWER: 'Viewer',
-};
+// rather than inventing a new variant. Roles are dynamic now, so colors
+// cycle through this palette by index instead of a fixed per-role map.
+const ROLE_BADGE_STATUS_CYCLE = ['checking', 'paused', 'up', 'down'] as const;
 
 function EditIcon() {
   return (
@@ -80,7 +69,15 @@ export function UserRow({
         <span className="text-[13px] text-text-muted">{user.username}</span>
       </td>
       <td className="px-5 py-2.5">
-        <Badge status={ROLE_BADGE_STATUS[user.role]} label={ROLE_LABEL[user.role]} />
+        <div className="flex flex-wrap gap-1">
+          {user.roles.length === 0 ? (
+            <span className="text-xs text-text-subtle">—</span>
+          ) : (
+            user.roles.map((role, i) => (
+              <Badge key={role.id} status={ROLE_BADGE_STATUS_CYCLE[i % ROLE_BADGE_STATUS_CYCLE.length]} label={role.name} />
+            ))
+          )}
+        </div>
       </td>
       <td className="px-5 py-2.5">
         <Toggle
