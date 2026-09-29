@@ -1,0 +1,95 @@
+# Phase 2, Server 1 — one DigitalOcean VPS running `api` + `web` as two
+# separate containers (never merged into one image) plus nginx for
+# TLS-terminated reverse proxying (certificates via Let's Encrypt/certbot —
+# see scripts/init-letsencrypt.sh for the one-time setup). Postgres/Redis
+# are externally managed (DigitalOcean Managed Databases) — nothing here
+# provisions a database.
+#
+# Env: copy .env.web-api.example -> .env.web-api and fill in real values
+# (managed Postgres/Redis connection strings, generated secrets, your
+# domain, your Let's Encrypt email). Never committed — see .gitignore.
+#
+# `api` publishes NO host port — only reachable by other containers on this
+# compose network (`web`'s server-side proxy talks to it at
+# http://api:4001). nginx is the only container with a host port, and it
+# only forwards to `web:4000` — this is what keeps apps/api genuinely
+# unreachable from the internet, not just "not linked to" by convention.
+#
+# First-time setup on a fresh server: run `./scripts/init-letsencrypt.sh
+# web-api` instead of `docker compose up` directly — it creates a
+# temporary certificate so nginx can start, brings the stack up, then
+# swaps in the real Let's Encrypt certificate. After that, plain
+# `docker compose -f docker-compose.web-api.yml up -d --build` (what
+# scripts/redeploy.sh runs) is all you need — renewal is automatic.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      target: production
+    env_file:
+      - .env.web-api
+    expose:
+      - '4001'
+    init: true
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      target: production
+    env_file:
+      - .env.web-api
+    environment:
+      API_URL: http://api:4001
+    depends_on:
+      - api
+    expose:
+      - '4000'
+    volumes:
+      # Persists uploaded branding images (apps/web/app/api/upload/route.ts)
+      # across redeploys/`docker compose up --build` — that route writes to
+      # <cwd>/public/uploads, and Dockerfile.web's production stage runs
+      # `next start` from /app/apps/web, so that's exactly this path.
+      - uploads_data:/app/apps/web/public/uploads
+    init: true
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    env_file:
+      - .env.web-api
+    volumes:
+      - ./nginx/web-api.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - certbot_certs:/etc/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
+    ports:
+      - '80:80'
+      - '443:443'
+    depends_on:
+      - web
+    # Reload on a timer so a certbot-renewed certificate gets picked up
+    # automatically — `nginx -s reload` is graceful/zero-downtime, so
+    # running it every 6h regardless (not just after an actual renewal)
+    # is cheap and avoids needing any cross-container signaling.
+    command: /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
+    restart: unless-stopped
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done;'
+    restart: unless-stopped
+
+volumes:
+  uploads_data:
+  certbot_certs:
+    name: certbot_certs
+  certbot_webroot:
+    name: certbot_webroot
