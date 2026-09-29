@@ -57,6 +57,13 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx/web-api.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Served directly by nginx (see nginx/web-api.conf.template's
+      # /uploads/ location) instead of proxied to `web` — Next.js 16's
+      # Turbopack production server snapshots `public/`'s contents at
+      # boot and never rescans it, so a file written to this volume by
+      # apps/web/app/api/upload/route.ts *after* the container started
+      # 404s forever from Next itself, no matter how long you wait.
+      - uploads_data:/uploads:ro
     ports:
       - '80:80'
     depends_on:

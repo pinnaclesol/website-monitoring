@@ -112,9 +112,30 @@ export function MonitorRow({
   }
 
   function copyUrl() {
-    navigator.clipboard
-      .writeText(`https://${monitor.domain}`)
-      .then(() => toast({ type: 'success', title: 'Copied', message: `https://${monitor.domain}` }));
+    const text = `https://${monitor.domain}`;
+    // navigator.clipboard requires a secure context (HTTPS or localhost) —
+    // unavailable on a plain-HTTP deployment, where it throws synchronously
+    // instead of rejecting. Fall back to the older execCommand approach,
+    // which still works over HTTP.
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => toast({ type: 'success', title: 'Copied', message: text }));
+      return;
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      toast({ type: 'success', title: 'Copied', message: text });
+    } catch {
+      toast({ type: 'error', title: 'Could not copy', message: text });
+    } finally {
+      document.body.removeChild(textarea);
+    }
   }
 
   return (
