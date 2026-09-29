@@ -10,9 +10,16 @@ build/
 # env files (keep examples)
 *.env
 !*.env.example
-# .env.docker holds real DB/Redis credentials (see .env.docker.example) —
-# *.env above doesn't match it since the filename doesn't end in ".env".
+# .env.docker/.env.web-api/.env.worker each hold real credentials (see
+# their matching .example files) — *.env above doesn't match any of them
+# since none of these filenames end in ".env".
 .env.docker
+.env.web-api
+.env.worker
+
+# Real managed-DB/SSH credentials sometimes get jotted down here as a
+# scratch note while provisioning infra — never let it become trackable.
+.info.txt
 
 # Prisma generated client
 libs/uptime-db/src/generated/
