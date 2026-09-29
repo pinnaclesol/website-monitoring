@@ -61,8 +61,14 @@ export interface MonitorStats {
 export interface IncidentWithMonitor {
   id: string;
   monitorId: string;
-  startedAt: string;
-  endedAt: string | null;
+  timestamp: string;
+  isUp: boolean;
+  statusCode: number | null;
+  responseTimeMs: number | null;
+  error: string | null;
+  checkLabel: string;
+  checkNumber: number;
+  totalChecks: number;
   monitor: { id: string; domain: string; label: string | null };
 }
 
@@ -76,6 +82,7 @@ export interface IncidentListResponse {
 
 export interface AlertSettings {
   id: string;
+  repeatIntervalSeconds: number;
   recoveryAlertEnabled: boolean;
 }
 

@@ -152,6 +152,8 @@ function buildAlertMessage(name: string, event: AlertEvent, occurredAt: string, 
   switch (event) {
     case 'down':
       return `🔴 ${name} is DOWN\nDetected at ${when}`;
+    case 'reminder':
+      return `⚠️ REMINDER: ${name} is STILL DOWN\nOngoing since ${when}`;
     case 'recovery':
       return `✅ ${name} is back up\nWas down for ${formatDuration(downtimeMs)}`;
   }

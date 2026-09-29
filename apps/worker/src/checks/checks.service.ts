@@ -161,6 +161,12 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     const wasDown = existingState?.isDown ?? false;
     const now = new Date();
 
+    const settings = await this.prisma.alertSettings.findFirst({
+      orderBy: { createdAt: 'asc' },
+    });
+    const repeatIntervalSeconds = (settings as unknown as { repeatIntervalSeconds?: number })?.repeatIntervalSeconds ?? 300;
+    const repeatIntervalMs = repeatIntervalSeconds * 1000;
+
     if (!isUp && !wasDown) {
       // up -> confirmed-down
       const openIncident = await this.prisma.incident.findFirst({
@@ -181,8 +187,21 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!isUp && wasDown) {
-      // Still down — already alerted once for this down period, and stays
-      // that way (isDown remains true) until it recovers. No repeat send.
+      // Still down — send a reminder alert every repeatIntervalMs
+      const lastAlertSentAt = existingState?.lastAlertSentAt;
+      if (lastAlertSentAt && now.getTime() - lastAlertSentAt.getTime() >= repeatIntervalMs) {
+        await this.prisma.monitorAlertState.update({
+          where: { monitorId },
+          data: { lastAlertSentAt: now },
+        });
+
+        const openIncident = await this.prisma.incident.findFirst({
+          where: { monitorId, endedAt: null },
+        });
+        const startedAt = openIncident?.startedAt ?? now;
+
+        await this.enqueueAlert(monitorId, 'reminder', startedAt);
+      }
       return;
     }
 
@@ -204,9 +223,6 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
         data: { isDown: false },
       });
 
-      const settings = await this.prisma.alertSettings.findFirst({
-        orderBy: { createdAt: 'asc' },
-      });
       if (settings?.recoveryAlertEnabled ?? true) {
         const downtimeMs = openIncident ? now.getTime() - openIncident.startedAt.getTime() : undefined;
         await this.enqueueAlert(monitorId, 'recovery', now, downtimeMs);

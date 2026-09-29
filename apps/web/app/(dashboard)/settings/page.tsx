@@ -71,17 +71,19 @@ function BrowserTabPreview({ title, faviconUrl }: { title: string; faviconUrl: s
 function applyBrowserTabBranding(siteTitle: string, faviconUrl: string | null) {
   document.title = siteTitle;
 
-  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-  if (!faviconUrl) {
-    link?.remove();
-    return;
+  const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (link) {
+    if (faviconUrl) {
+      link.href = faviconUrl;
+    } else {
+      link.removeAttribute('href');
+    }
+  } else if (faviconUrl) {
+    const newLink = document.createElement('link');
+    newLink.rel = 'icon';
+    newLink.href = faviconUrl;
+    document.head.appendChild(newLink);
   }
-  if (!link) {
-    link = document.createElement('link');
-    link.rel = 'icon';
-    document.head.appendChild(link);
-  }
-  link.href = faviconUrl;
 }
 
 const CHECK_INTERVAL_MIN = 30;

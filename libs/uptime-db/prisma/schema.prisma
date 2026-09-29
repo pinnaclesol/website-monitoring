@@ -287,10 +287,11 @@ model MonitoringSettings {
 /// per down period (see `MonitorAlertState`'s doc comment), not a repeating
 /// nag while a monitor stays down.
 model AlertSettings {
-  id                   String   @id @default(cuid())
-  recoveryAlertEnabled Boolean  @default(true)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  repeatIntervalSeconds Int      @default(300)
+  recoveryAlertEnabled  Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   @@map("AlertSettings")
 }

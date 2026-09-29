@@ -73,6 +73,7 @@ export default function NotificationsPage() {
   const [savingSmtp, setSavingSmtp] = useState(false);
 
   const [settings, setSettings] = useState<AlertSettings | null>(null);
+  const [repeatInterval, setRepeatInterval] = useState(300);
   const [recoveryAlert, setRecoveryAlert] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
 
@@ -90,6 +91,7 @@ export default function NotificationsPage() {
         setSignalRecipient(sig.recipientNumber);
       }
       setSettings(ns);
+      setRepeatInterval(ns.repeatIntervalSeconds ?? 300);
       setRecoveryAlert(ns.recoveryAlertEnabled);
 
       if (EMAIL_ENABLED) {
@@ -229,7 +231,10 @@ export default function NotificationsPage() {
     try {
       const updated = await apiFetch<AlertSettings>('settings/alerts', {
         method: 'PATCH',
-        body: JSON.stringify({ recoveryAlertEnabled: recoveryAlert }),
+        body: JSON.stringify({
+          repeatIntervalSeconds: repeatInterval,
+          recoveryAlertEnabled: recoveryAlert,
+        }),
       });
       setSettings(updated);
       toast({ type: 'success', title: 'Settings saved', message: 'Alert behavior updated' });
@@ -460,19 +465,37 @@ export default function NotificationsPage() {
                 ) : null}
 
                 <TabsContent value="behaviour">
-                  <Hint>
-                    Exactly one alert is sent when a monitor goes down, and (if enabled below) one more when it
-                    recovers — never a repeating reminder while it stays down.
-                  </Hint>
-                  <div className="mb-4 mt-3.5">
-                    <FieldLabel>Send recovery alert</FieldLabel>
-                    <div className="mt-1.5 flex items-center gap-2.5">
-                      <Toggle checked={recoveryAlert} onCheckedChange={setRecoveryAlert} disabled={!canUpdate} />
-                      <span className="text-[13px] text-text-muted">Notify when a downed monitor comes back online</span>
+                  <div className="space-y-4">
+                    <div>
+                      <FieldLabel>Repeat alert every</FieldLabel>
+                      <div className="flex w-fit items-stretch">
+                        <Input
+                          type="number"
+                          min={30}
+                          max={86400}
+                          value={repeatInterval}
+                          onChange={(e) => setRepeatInterval(Number(e.target.value))}
+                          className="w-[120px] rounded-r-none border-r-0"
+                          disabled={!canUpdate}
+                        />
+                        <span className="flex items-center rounded rounded-l-none border border-border-strong bg-bg-muted px-3 text-[13px] text-text-muted">
+                          seconds
+                        </span>
+                      </div>
+                      <Hint>How often to re-send while a site is still down.</Hint>
+                    </div>
+
+                    <div>
+                      <FieldLabel>Send recovery alert</FieldLabel>
+                      <div className="mt-1.5 flex items-center gap-2.5">
+                        <Toggle checked={recoveryAlert} onCheckedChange={setRecoveryAlert} disabled={!canUpdate} />
+                        <span className="text-[13px] text-text-muted">Notify when a downed monitor comes back online</span>
+                      </div>
                     </div>
                   </div>
+
                   {canUpdate ? (
-                    <Button onClick={saveAlertBehavior} disabled={savingSettings}>
+                    <Button className="mt-5" onClick={saveAlertBehavior} disabled={savingSettings}>
                       {savingSettings ? 'Saving…' : 'Save settings'}
                     </Button>
                   ) : null}
