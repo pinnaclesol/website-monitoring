@@ -26,7 +26,7 @@ jobs:
       - name: SSH in and redeploy
         run: |
           ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.APP_SERVER_HOST }} \
-            'cd /var/www/website-monitoring && ./scripts/redeploy.sh docker-compose.web-api.yml'
+            'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.web-api.yml'
 
   deploy-worker:
     name: Deploy worker server
@@ -44,4 +44,4 @@ jobs:
       - name: SSH in and redeploy
         run: |
           ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.WORKER_SERVER_HOST }} \
-            'cd /var/www/website-monitoring && ./scripts/redeploy.sh docker-compose.worker.yml'
+            'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.worker.yml'
