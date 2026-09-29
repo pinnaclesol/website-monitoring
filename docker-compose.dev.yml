@@ -1,8 +1,14 @@
 # Env vars: `.env` (your existing one, unchanged) plus `.env.docker` (copy
-# from .env.docker.example — overrides DATABASE_URL/REDIS_URL to use
-# host.docker.internal instead of localhost, since "localhost" inside a
-# container means the container itself, not this machine). See
-# .env.docker.example for why.
+# from .env.docker.example — overrides DATABASE_URL/REDIS_URL to point at
+# THIS file's own `postgres`/`redis` services instead of your host machine).
+# See .env.docker.example for why.
+#
+# Postgres/Redis are full services in this stack (not your host's DBngin
+# instance) so a fresh clone needs nothing installed locally beyond Docker —
+# no local Postgres/Redis, no host firewall/listen_addresses config. Their
+# data lives in the `postgres_data`/`redis_data` named volumes below, so it
+# survives `docker compose down` (but not `down -v`) — this is a separate,
+# empty database from whatever your native `npm run dev` talks to.
 #
 # `web`'s API_URL is set here directly (not in an env file) — it's
 # Docker-topology-specific (the compose service name `api`, resolved via
@@ -18,12 +24,48 @@
 #                                     "recursive task invocation" errors —
 #                                     each container needs its own isolated
 #                                     copy, not the host's (or each other's).
+#                                     If this ever misfires again (e.g. after
+#                                     a hard crash/force-quit), clear it with
+#                                     `docker compose -f docker-compose.dev.yml down -v`.
 #   /app/libs/uptime-db/src/generated — the *Linux* Prisma engine binary
 #                                     baked in at image build time; `web`
 #                                     never imports @uptime/uptime-db, so it
 #                                     doesn't need this one.
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: uptime_db
+    # No `ports:` published to the host on purpose — only `api`/`worker`
+    # need to reach this, over Docker's internal network (service name
+    # `postgres`), and plenty of machines already have something bound to
+    # the default 5432/6379 (e.g. a local Postgres/Redis install), which
+    # would otherwise fail this stack's startup with a port-conflict error.
+    # Need host access anyway (e.g. Prisma Studio, redis-cli)? Run it
+    # through the container instead: `docker compose -f docker-compose.dev.yml exec postgres psql -U postgres uptime_db`.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   api:
     build:
       context: .
@@ -41,8 +83,11 @@ services:
       # cycle in its own chain. Disabling the daemon makes each `nx` call
       # fully standalone — the documented fix for exactly this scenario.
       NX_DAEMON: 'false'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - '4001:4001'
     volumes:
@@ -83,8 +128,11 @@ services:
       - .env.docker
     environment:
       NX_DAEMON: 'false'
-    extra_hosts:
-      - 'host.docker.internal:host-gateway'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - '4002:4002'
     volumes:
@@ -93,3 +141,7 @@ services:
       - /app/.nx
       - /app/libs/uptime-db/src/generated
     init: true
+
+volumes:
+  postgres_data:
+  redis_data:
