@@ -1,15 +1,14 @@
 # Phase 2, Server 2 — a second, separate DigitalOcean VPS running
 # apps/worker alone, plus nginx fronting its Bull Board (/admin/queues,
-# already Basic-Auth-gated by BULL_BOARD_USER/PASS) and /health, with TLS
-# via Let's Encrypt/certbot (see scripts/init-letsencrypt.sh).
+# already Basic-Auth-gated by BULL_BOARD_USER/PASS) and /health.
 #
-# Env: copy .env.worker.example -> .env.worker and fill in real values
-# (including your domain and Let's Encrypt email). Never committed — see
-# .gitignore.
+# Plain HTTP for now, deliberately — no TLS/Let's Encrypt here (see
+# nginx/worker.conf.template). Re-add scripts/init-letsencrypt.sh's
+# certbot service + port 443 later if this needs to be internet-facing
+# over HTTPS.
 #
-# First-time setup on a fresh server: run `./scripts/init-letsencrypt.sh
-# worker` instead of `docker compose up` directly — see
-# docker-compose.web-api.yml's header comment for why.
+# Env: copy .env.worker.example -> .env.worker and fill in real values.
+# Never committed — see .gitignore.
 #
 # Uncomment the signal-cli-rest-api service below only if you want it
 # co-located on this server (matches CLAUDE.md's default) rather than
@@ -32,28 +31,12 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    env_file:
-      - .env.worker
     volumes:
       - ./nginx/worker.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - certbot_certs:/etc/letsencrypt:ro
-      - certbot_webroot:/var/www/certbot:ro
     ports:
       - '80:80'
-      - '443:443'
     depends_on:
       - worker
-    command: /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g 'daemon off;'"
-    restart: unless-stopped
-
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - certbot_certs:/etc/letsencrypt
-      - certbot_webroot:/var/www/certbot
-    entrypoint: ['/bin/sh', '-c']
-    command:
-      - 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done;'
     restart: unless-stopped
 
   # signal-cli-rest-api:
@@ -64,9 +47,5 @@ services:
   #     - signal_data:/home/.local/share/signal-cli
   #   restart: unless-stopped
 
-volumes:
-  certbot_certs:
-    name: certbot_certs
-  certbot_webroot:
-    name: certbot_webroot
-  # signal_data:
+# volumes:
+#   signal_data:
