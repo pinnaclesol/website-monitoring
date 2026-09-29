@@ -51,29 +51,30 @@ export function UserModal({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [roles, setRoles] = useState<RoleRecord[]>([]);
-  const [roleIds, setRoleIds] = useState<string[]>([]);
+  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
   const [active, setActive] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     apiFetch<RoleRecord[]>('roles')
-      .then(setRoles)
+      .then((data) => {
+        setRoles(data);
+        if (!editingUser && data.length > 0) {
+          setSelectedRoleId((prev) => prev || data[0].id);
+        }
+      })
       .catch(() => setRoles([]));
-  }, [open]);
+  }, [open, editingUser]);
 
   useEffect(() => {
     if (!open) return;
     setName(editingUser?.name ?? '');
     setUsername(editingUser?.username ?? '');
     setPassword('');
-    setRoleIds(editingUser?.roles.map((r) => r.id) ?? []);
+    setSelectedRoleId(editingUser?.roles[0]?.id ?? '');
     setActive(editingUser?.active ?? true);
   }, [open, editingUser]);
-
-  function toggleRole(roleId: string, checked: boolean) {
-    setRoleIds((prev) => (checked ? [...prev, roleId] : prev.filter((id) => id !== roleId)));
-  }
 
   // Empty password in edit mode means "keep current" — only validate length
   // once something's been typed. In create mode it's always required.
@@ -94,13 +95,14 @@ export function UserModal({
       toast({ type: 'error', title: `Password must be ${PASSWORD_MIN}–${PASSWORD_MAX} characters` });
       return;
     }
-    if (roleIds.length === 0) {
-      toast({ type: 'error', title: 'Select at least one role' });
+    if (!selectedRoleId) {
+      toast({ type: 'error', title: 'Select a role' });
       return;
     }
 
     setSubmitting(true);
     try {
+      const roleIds = [selectedRoleId];
       if (isEdit) {
         const body: Record<string, unknown> = { username: username.trim(), name: name.trim() || null, roleIds, active };
         if (password.trim()) body.password = password.trim();
@@ -143,7 +145,7 @@ export function UserModal({
           <Button
             size="sm"
             onClick={handleSubmit}
-            disabled={submitting || !username.trim() || !passwordValid || roleIds.length === 0}
+            disabled={submitting || !username.trim() || !passwordValid || !selectedRoleId}
           >
             {submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Add user'}
           </Button>
@@ -204,7 +206,7 @@ export function UserModal({
       </div>
       <div className="mb-3.5">
         <label className="mb-1.5 block text-[13px] font-medium text-text">
-          Roles <span className="text-red">*</span>
+          Role <span className="text-red">*</span>
         </label>
         {roles.length === 0 ? (
           <div className="text-xs text-text-subtle">Loading roles…</div>
@@ -213,9 +215,11 @@ export function UserModal({
             {roles.map((r) => (
               <label key={r.id} className="flex cursor-pointer items-center gap-2 text-[13px] text-text">
                 <input
-                  type="checkbox"
-                  checked={roleIds.includes(r.id)}
-                  onChange={(e) => toggleRole(r.id, e.target.checked)}
+                  type="radio"
+                  name="userRole"
+                  value={r.id}
+                  checked={selectedRoleId === r.id}
+                  onChange={() => setSelectedRoleId(r.id)}
                   className="size-3.5 accent-accent"
                 />
                 {r.name}

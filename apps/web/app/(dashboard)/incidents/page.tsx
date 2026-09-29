@@ -174,9 +174,8 @@ export default function IncidentsPage() {
                     <tr className="border-b border-border bg-bg-secondary">
                       <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Monitor</th>
                       <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">URL</th>
-                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Status</th>
-                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Started</th>
-                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Duration</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Event</th>
+                      <th className="px-5 py-2.5 text-left text-[11.5px] font-medium text-text-muted">Check #</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -200,18 +199,15 @@ export default function IncidentsPage() {
                           </a>
                         </td>
                         <td className="px-5 py-2.5">
-                          {incident.endedAt ? (
-                            <Badge status="up" label="Recovered" />
+                          {incident.isUp ? (
+                            <Badge status="up" label="Up" />
                           ) : (
-                            <Badge status="down" label="Ongoing" />
+                            <Badge status="down" label="Down" />
                           )}
                         </td>
                         <td className="px-5 py-2.5">
-                          <span className="text-xs text-text-muted">{formatTimestamp(incident.startedAt)}</span>
-                        </td>
-                        <td className="px-5 py-2.5">
                           <span className="font-mono text-[12.5px] text-text-muted">
-                            {formatDurationBetween(incident.startedAt, incident.endedAt)}
+                            {incident.checkLabel || `#${incident.checkNumber} of ${incident.totalChecks}`}
                           </span>
                         </td>
                       </tr>
