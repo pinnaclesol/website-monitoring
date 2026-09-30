@@ -1,8 +1,9 @@
 #!/bin/bash
 # Pulls the latest code and rebuilds/restarts one server's containers.
-# Run from the repo root on either server:
-#   ./scripts/redeploy.sh docker-compose.web-api.yml
-#   ./scripts/redeploy.sh docker-compose.worker.yml
+# Run from the repo root:
+#   ./scripts/redeploy.sh
+# Or specify a custom compose file:
+#   ./scripts/redeploy.sh docker-compose.prod.yml
 #
 # `docker compose up -d --build` only rebuilds images whose build context
 # actually changed (Docker's own layer cache) — safe to run after every
@@ -11,7 +12,7 @@
 # Dockerfile.api), so pending migrations apply automatically here too.
 set -e
 
-COMPOSE_FILE="${1:?Usage: ./scripts/redeploy.sh <docker-compose.web-api.yml|docker-compose.worker.yml>}"
+COMPOSE_FILE="${1:-docker-compose.prod.yml}"
 
 echo "[INFO] Pulling latest code..."
 git pull

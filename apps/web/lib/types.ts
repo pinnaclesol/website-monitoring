@@ -100,11 +100,29 @@ export interface TelegramAccount {
   isActive: boolean;
 }
 
-export interface SignalConfig {
+export interface SignalGroup {
   id: string;
-  senderNumber: string;
-  recipientNumber: string;
+  groupId: string;
+  name: string | null;
+  accountId: string;
   isActive: boolean;
+  receiveAlerts: boolean;
+}
+
+export interface SignalAccount {
+  id: string;
+  phoneNumber: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  groups: SignalGroup[];
+}
+
+export interface SignalConfig {
+  id?: string;
+  senderNumber?: string;
+  recipientNumber?: string;
+  isActive?: boolean;
 }
 
 export interface EmailRecipient {

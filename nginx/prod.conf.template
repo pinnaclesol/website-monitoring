@@ -1,0 +1,51 @@
+server {
+    listen 80 default_server;
+    server_name _;
+
+    client_max_body_size 10m;
+
+    # 127.0.0.11 is Docker's embedded DNS. Container IPs can change on redeploy,
+    # so a variable forces nginx to re-resolve dynamically per the valid window.
+    resolver 127.0.0.11 valid=10s;
+
+    # Direct static file serving for branding images (logos, favicons)
+    location /uploads/ {
+        alias /uploads/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Bull Board queue observability dashboard (Basic Auth handled by worker)
+    location /admin/queues {
+        set $upstream_worker http://worker:4002;
+        proxy_pass $upstream_worker;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Worker health check endpoint
+    location /worker-health {
+        set $upstream_worker http://worker:4002;
+        proxy_pass $upstream_worker/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Main Next.js web application
+    location / {
+        set $upstream_web http://web:4000;
+        proxy_pass $upstream_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}

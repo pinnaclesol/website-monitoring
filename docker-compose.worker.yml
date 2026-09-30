@@ -39,13 +39,18 @@ services:
       - worker
     restart: unless-stopped
 
-  # signal-cli-rest-api:
-  #   image: bbernhard/signal-cli-rest-api:latest
-  #   environment:
-  #     MODE: normal
-  #   volumes:
-  #     - signal_data:/home/.local/share/signal-cli
-  #   restart: unless-stopped
+  signal-bridge:
+    image: bbernhard/signal-cli-rest-api:latest-dev
+    container_name: signal-bridge
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: always
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./signal-data:/home/.local/share/signal-cli
+    environment:
+      - MODE=json-rpc
+      - LOG_LEVEL=debug
 
-# volumes:
-#   signal_data:

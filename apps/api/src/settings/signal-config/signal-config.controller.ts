@@ -1,35 +1,39 @@
-import { Body, Controller, Get, Put, Res } from '@nestjs/common';
-import type { Response } from 'express';
+import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
 import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { SignalConfigService } from './signal-config.service';
-import { UpsertSignalConfigDto } from './dto/upsert-signal-config.dto';
+import { ToggleGroupAlertsDto } from './dto/toggle-group-alerts.dto';
 
 @Controller('settings/signal-config')
 export class SignalConfigController {
   constructor(private readonly service: SignalConfigService) {}
 
-  /**
-   * `@Res()` (full manual control, not `passthrough`) on purpose: this is
-   * the one route in the app whose "no config yet" state is a real `null`
-   * value, not an empty array or an auto-created singleton row (unlike
-   * AlertSettings/BrandingSettings, which always getOrCreate). NestJS's
-   * default return-value handling collapses a handler returning `null`
-   * into a genuinely empty HTTP body (0 bytes, not the 4-byte JSON text
-   * "null") — the frontend's `res.json()` then throws "Unexpected end of
-   * JSON input" trying to parse nothing. Calling `res.json()` ourselves
-   * writes real JSON, `null` included, so the client always gets parseable
-   * JSON matching the `SignalConfig | null` contract.
-   */
   @Get()
   @RequirePermission('notifications:view')
-  async findCurrent(@Res() res: Response): Promise<void> {
-    const config = await this.service.findCurrent();
-    res.status(200).json(config);
+  findAll() {
+    return this.service.getAccounts();
   }
 
-  @Put()
+  @Get('accounts')
+  @RequirePermission('notifications:view')
+  getAccounts() {
+    return this.service.getAccounts();
+  }
+
+  @Post('sync')
   @RequirePermission('notifications:update')
-  upsert(@Body() dto: UpsertSignalConfigDto) {
-    return this.service.upsert(dto);
+  sync() {
+    return this.service.syncAccountsAndGroups();
+  }
+
+  @Patch('groups/:id/toggle')
+  @RequirePermission('notifications:update')
+  toggleGroup(@Param('id') id: string, @Body() dto: ToggleGroupAlertsDto) {
+    return this.service.toggleGroupAlerts(id, dto.receiveAlerts);
+  }
+
+  @Delete('accounts/:phone')
+  @RequirePermission('notifications:update')
+  deleteAccount(@Param('phone') phone: string) {
+    return this.service.deleteAccount(phone);
   }
 }

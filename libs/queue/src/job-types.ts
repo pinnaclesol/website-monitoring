@@ -18,3 +18,9 @@ export interface AlertDispatchJobData {
 
 /** Payload for the daily `cleanup` job — trims each Monitor's MonitorCheck rows to the newest 500. No fields needed. */
 export type CleanupJobData = Record<string, never>;
+
+/** Payload for the `signal-sync` job — syncs connected accounts and groups from Signal bridge. */
+export interface SignalSyncJobData {
+  manual?: boolean;
+}
+

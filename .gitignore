@@ -64,3 +64,4 @@ apps/web/public/uploads/
 
 # misc
 *.local
+signal-data/

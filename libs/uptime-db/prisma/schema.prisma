@@ -217,18 +217,35 @@ model TelegramAccount {
   @@map("TelegramAccount")
 }
 
-/// Signal sender/recipient pairing. Single config (not multi-account) —
-/// requires a running signal-cli-rest-api sidecar with a registered phone
-/// number, so this models an infra-bound integration, not just a credential.
-model SignalConfig {
-  id              String   @id @default(cuid())
-  senderNumber    String
-  recipientNumber String
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+/// A linked Signal account registered with the signal-bridge sidecar.
+/// Supports multiple accounts linked via QR code scan.
+model SignalAccount {
+  id          String        @id @default(cuid())
+  phoneNumber String        @unique @map("phone_number")
+  isActive    Boolean       @default(true) @map("is_active")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+  groups      SignalGroup[]
 
-  @@map("SignalConfig")
+  @@map("signal_accounts")
+}
+
+/// A Signal group that a linked SignalAccount belongs to.
+/// `receiveAlerts` dictates whether downtime/recovery alerts are dispatched
+/// to this specific group (alerting only occurs for user-selected groups).
+model SignalGroup {
+  id            String        @id @default(cuid())
+  groupId       String        @map("group_id")
+  name          String?
+  accountId     String        @map("account_id")
+  isActive      Boolean       @default(true) @map("is_active")
+  receiveAlerts Boolean       @default(false) @map("receive_alerts")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  account       SignalAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, groupId])
+  @@map("signal_groups")
 }
 
 /// The SMTP relay email alerts are sent through — single config (not
