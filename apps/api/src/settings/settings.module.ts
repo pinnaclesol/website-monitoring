@@ -4,6 +4,10 @@ import { TelegramAccountsController } from './telegram-accounts/telegram-account
 import { TelegramAccountsService } from './telegram-accounts/telegram-accounts.service';
 import { SignalConfigController } from './signal-config/signal-config.controller';
 import { SignalConfigService } from './signal-config/signal-config.service';
+import { SignalConnectController } from './signal-config/signal-connect.controller';
+import { SignalConnectService } from './signal-config/signal-connect.service';
+import { RecipientNumbersController } from './signal-config/recipient-numbers/recipient-numbers.controller';
+import { RecipientNumbersService } from './signal-config/recipient-numbers/recipient-numbers.service';
 import { EmailRecipientsController } from './email-recipients/email-recipients.controller';
 import { EmailRecipientsService } from './email-recipients/email-recipients.service';
 import { SmtpConfigController } from './smtp-config/smtp-config.controller';
@@ -22,6 +26,8 @@ import { BrandingSettingsService } from './branding-settings/branding-settings.s
   controllers: [
     TelegramAccountsController,
     SignalConfigController,
+    SignalConnectController,
+    RecipientNumbersController,
     EmailRecipientsController,
     SmtpConfigController,
     AlertSettingsController,
@@ -31,6 +37,8 @@ import { BrandingSettingsService } from './branding-settings/branding-settings.s
   providers: [
     TelegramAccountsService,
     SignalConfigService,
+    SignalConnectService,
+    RecipientNumbersService,
     EmailRecipientsService,
     SmtpConfigService,
     AlertSettingsService,

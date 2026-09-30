@@ -6,7 +6,12 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { createAlertDispatchQueue, createCleanupQueue, createMonitorChecksQueue } from '@uptime/queue';
+import {
+  createAlertDispatchQueue,
+  createCleanupQueue,
+  createMonitorChecksQueue,
+  createSignalGroupsSyncQueue,
+} from '@uptime/queue';
 import { AppModule } from './app.module';
 
 const BULL_BOARD_PATH = '/admin/queues';
@@ -68,10 +73,11 @@ async function bootstrap(): Promise<void> {
   // close their BullMQ Workers there) on process shutdown signals.
   app.enableShutdownHooks();
 
-  // Bull Board — read-only observability for all three queues. These Queue
+  // Bull Board — read-only observability for all four queues. These Queue
   // instances are only used for the dashboard UI (read-only), share the one
   // Redis connection via @uptime/queue's factories, and are separate from
-  // the consumer Workers registered by ChecksModule/CleanupModule/AlertsModule.
+  // the consumer Workers registered by ChecksModule/CleanupModule/
+  // AlertsModule/SignalGroupsSyncModule.
   const serverAdapter = new ExpressAdapter();
   serverAdapter.setBasePath(BULL_BOARD_PATH);
 
@@ -80,6 +86,7 @@ async function bootstrap(): Promise<void> {
       new BullMQAdapter(createMonitorChecksQueue()),
       new BullMQAdapter(createAlertDispatchQueue()),
       new BullMQAdapter(createCleanupQueue()),
+      new BullMQAdapter(createSignalGroupsSyncQueue()),
     ],
     serverAdapter,
   });

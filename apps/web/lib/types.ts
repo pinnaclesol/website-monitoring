@@ -103,8 +103,18 @@ export interface TelegramAccount {
 export interface SignalConfig {
   id: string;
   senderNumber: string;
-  recipientNumber: string;
+  recipientGroupId: string | null;
+  recipientGroupName: string | null;
   isActive: boolean;
+}
+
+/** Mirrors apps/api's `settings/signal-config/recipient-numbers` response shape — a fallback destination used when no Signal group is selected. */
+export interface SignalRecipientNumber {
+  id: string;
+  phoneNumber: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface EmailRecipient {

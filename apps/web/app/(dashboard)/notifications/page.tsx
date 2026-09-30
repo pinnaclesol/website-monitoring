@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
+import { parsePhoneNumberFromString } from 'libphonenumber-js/min';
 import { hasPermission } from '@uptime/auth';
 import {
   Topbar,
@@ -18,10 +19,25 @@ import {
   TabsList,
   TabsTrigger,
   TabsContent,
+  Modal,
+  ConfirmDialog,
+  IncidentBanner,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
   useToast,
 } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
-import type { TelegramAccount, SignalConfig, EmailRecipient, SmtpConfig, AlertSettings } from '../../../lib/types';
+import type {
+  TelegramAccount,
+  SignalConfig,
+  SignalRecipientNumber,
+  EmailRecipient,
+  SmtpConfig,
+  AlertSettings,
+} from '../../../lib/types';
 import { useSiteName } from '../site-name-context';
 import { PermissionGate } from '../permission-gate';
 
@@ -42,6 +58,51 @@ function SubHeading({ children }: { children: React.ReactNode }) {
 // step once real SMTP sending exists.
 const EMAIL_ENABLED = false;
 
+// Signal alerts are group-only for now (product decision) — fallback numbers
+// are hidden rather than removed: the SignalRecipientNumber backend/CRUD/state
+// below is untouched, so flipping this back to true is the whole re-enable
+// step, symmetric with apps/worker's AlertsService.sendSignalAlert() which
+// has the matching flag/comment on its own group-only simplification.
+const SIGNAL_FALLBACK_NUMBERS_ENABLED = false;
+
+/** Mirrors apps/api's `GET settings/signal-config/status` response shape. */
+type SignalStatusResponse =
+  | { state: 'not_configured' }
+  | { state: 'sidecar_unreachable'; detail: string }
+  | {
+      state: 'connected';
+      senderNumber: string;
+      isActive: boolean;
+      deviceName?: string;
+      linkedAt?: string;
+      recipientGroupId?: string;
+      recipientGroupName?: string;
+    };
+
+type SignalUiStatus = 'not_configured' | 'connected' | 'sidecar_unreachable' | 'connecting';
+
+/** Mirrors apps/api's `GET settings/signal-config/groups` response shape. */
+interface SignalGroupSummary {
+  id: string;
+  name: string;
+}
+
+/** Sentinel `<select>`/`Select` value meaning "no group selected — no Signal alerts will be sent". */
+const SIGNAL_NO_GROUP = 'none';
+
+/**
+ * Formats an E.164 number (e.g. `+923209737896`) into a properly
+ * country-code-separated international display form (e.g. `+92 320 9737896`).
+ * Never throws — falls back to the raw string unchanged if parsing fails.
+ */
+function formatPhoneNumber(raw: string): string {
+  try {
+    return parsePhoneNumberFromString(raw)?.formatInternational() ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
 export default function NotificationsPage() {
   const toast = useToast();
   const breadcrumbSiteName = useSiteName();
@@ -54,10 +115,57 @@ export default function NotificationsPage() {
   const [newTgChat, setNewTgChat] = useState('');
   const [addingTg, setAddingTg] = useState(false);
 
-  const [signal, setSignal] = useState<SignalConfig | null>(null);
-  const [signalSender, setSignalSender] = useState('');
-  const [signalRecipient, setSignalRecipient] = useState('');
+  const [activeTab, setActiveTab] = useState('telegram');
+
+  // `null` = status not fetched yet (brief initial load only — the mount
+  // effect below awaits it alongside the other tabs' data).
+  const [signalStatus, setSignalStatus] = useState<SignalUiStatus | null>(null);
+  const [signalStatusDetail, setSignalStatusDetail] = useState<string | null>(null);
+  const [signalSenderNumber, setSignalSenderNumber] = useState('');
+  const [signalDeviceName, setSignalDeviceName] = useState<string | null>(null);
+  const [signalLinkedAt, setSignalLinkedAt] = useState<string | null>(null);
+  const [signalActive, setSignalActive] = useState(true);
   const [savingSignal, setSavingSignal] = useState(false);
+  // Fallback phone-number list — a real add/remove list now, same pattern as
+  // `emailRecipients` below, replacing the old single `recipientNumber` field
+  // on `SignalConfig` (backend now stores these as `SignalRecipientNumber` rows).
+  const [signalRecipientNumbers, setSignalRecipientNumbers] = useState<SignalRecipientNumber[] | null>(null);
+  const [newSignalRecipientNumber, setNewSignalRecipientNumber] = useState('');
+  const [addingSignalRecipientNumber, setAddingSignalRecipientNumber] = useState(false);
+  // Signal-group picker state — independent of the plain-number fields above.
+  // `signalGroups === null` means "not fetched yet"; a failed fetch leaves it
+  // `null` too, retried on the next status-fetch cadence tick (see
+  // fetchSignalStatus) rather than looping on its own.
+  const [signalGroups, setSignalGroups] = useState<SignalGroupSummary[] | null>(null);
+  const [signalGroupsError, setSignalGroupsError] = useState<string | null>(null);
+  const [loadingSignalGroups, setLoadingSignalGroups] = useState(false);
+  const [refreshingSignalGroups, setRefreshingSignalGroups] = useState(false);
+  // The picker's current selection — `SIGNAL_NO_GROUP` or a group id. Synced
+  // from the server's `recipientGroupId` on every status fetch.
+  const [signalSelectedGroupId, setSignalSelectedGroupId] = useState<string>(SIGNAL_NO_GROUP);
+  // Which group is ACTUALLY active right now, per the last status fetch —
+  // deliberately separate from the picker's own selection state above so the
+  // "sending alerts to" display never reflects an unsaved selection. `null`
+  // means no group is selected — a valid, intentional "no alerts" state now
+  // that Signal alerts are group-only (see SIGNAL_FALLBACK_NUMBERS_ENABLED).
+  const [signalActiveRecipient, setSignalActiveRecipient] = useState<{ name: string } | null>(null);
+  // Set when a background status re-fetch sees a previously-`connected` link
+  // silently drop to `not_configured` (not via the user's own Disconnect
+  // click, which sets state directly instead of going through this path) —
+  // drives the cross-cutting "reconnect Signal" banner.
+  const [signalDroppedBanner, setSignalDroppedBanner] = useState(false);
+  const [signalBannerDismissed, setSignalBannerDismissed] = useState(false);
+  const prevSignalStatusRef = useRef<SignalUiStatus | null>(null);
+
+  const [signalLinkModalOpen, setSignalLinkModalOpen] = useState(false);
+  const [signalQrDataUrl, setSignalQrDataUrl] = useState<string | null>(null);
+  const [signalQrRefreshing, setSignalQrRefreshing] = useState(false);
+  const [signalQrError, setSignalQrError] = useState<string | null>(null);
+  const [signalQrRetryTick, setSignalQrRetryTick] = useState(0);
+  const [signalDisconnectConfirmOpen, setSignalDisconnectConfirmOpen] = useState(false);
+  const [disconnectingSignal, setDisconnectingSignal] = useState(false);
+  const [sendingSignalTest, setSendingSignalTest] = useState(false);
+  const signalTabRef = useRef<HTMLDivElement>(null);
 
   const [emailRecipients, setEmailRecipients] = useState<EmailRecipient[] | null>(null);
   const [newEmail, setNewEmail] = useState('');
@@ -79,17 +187,12 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     async function load() {
-      const [tg, sig, ns] = await Promise.all([
+      const [tg, , ns] = await Promise.all([
         apiFetch<TelegramAccount[]>('settings/telegram-accounts'),
-        apiFetch<SignalConfig | null>('settings/signal-config'),
+        fetchSignalStatus(),
         apiFetch<AlertSettings>('settings/alerts'),
       ]);
       setTelegramAccounts(tg);
-      setSignal(sig);
-      if (sig) {
-        setSignalSender(sig.senderNumber);
-        setSignalRecipient(sig.recipientNumber);
-      }
       setSettings(ns);
       setRepeatInterval(ns.repeatIntervalSeconds ?? 300);
       setRecoveryAlert(ns.recoveryAlertEnabled);
@@ -111,7 +214,9 @@ export default function NotificationsPage() {
       }
     }
     load().catch((err) => toast({ type: 'error', title: 'Could not load settings', message: err.message }));
-    // Load once — this page has no live-updating data, unlike the dashboard/incidents polls.
+    // Load once — this page has no live-updating data, EXCEPT Signal's connection
+    // status, which is a live external system re-fetched on its own below (tab
+    // focus/switch + a light poll), independent of this one-shot mount load.
   }, []);
 
   async function addTelegramAccount() {
@@ -147,25 +252,327 @@ export default function NotificationsPage() {
     }
   }
 
-  async function saveSignal() {
-    if (!signalSender.trim() || !signalRecipient.trim()) {
-      toast({ type: 'error', title: 'Both numbers required' });
-      return;
+  // Fetches the live link status from the Signal sidecar. Called on mount
+  // (as part of the page's one-shot load), whenever the Signal tab becomes
+  // active/focused, and on a light background poll — see the effects below.
+  // Detects a `connected` → `not_configured` flip (a link silently dropping)
+  // to drive the cross-cutting "reconnect Signal" banner; disconnectSignal()
+  // below bypasses this by updating state directly, since that flip is
+  // expected/deliberate there, not a silent drop.
+  //
+  // Also piggybacks the group-list fetch onto this exact same cadence (mount,
+  // tab focus, window focus, background poll) rather than a separate
+  // "fetch once on becoming connected" effect — a background job now keeps
+  // the group cache synced server-side every ~60s, so there's no manual
+  // "Refresh groups" button anymore; the picker just stays fresh for free.
+  async function fetchSignalStatus() {
+    try {
+      const result = await apiFetch<SignalStatusResponse>('settings/signal-config/status');
+      if (prevSignalStatusRef.current === 'connected' && result.state === 'not_configured') {
+        setSignalDroppedBanner(true);
+      }
+      if (result.state === 'connected') {
+        setSignalDroppedBanner(false);
+        setSignalBannerDismissed(false);
+        setSignalSenderNumber(result.senderNumber);
+        setSignalActive(result.isActive);
+        setSignalDeviceName(result.deviceName ?? null);
+        setSignalLinkedAt(result.linkedAt ?? null);
+        setSignalStatusDetail(null);
+        setSignalSelectedGroupId(result.recipientGroupId ?? SIGNAL_NO_GROUP);
+        setSignalActiveRecipient(
+          result.recipientGroupId ? { name: result.recipientGroupName ?? result.recipientGroupId } : null
+        );
+        void fetchSignalGroups();
+      } else if (result.state === 'sidecar_unreachable') {
+        setSignalStatusDetail(result.detail);
+      } else {
+        setSignalStatusDetail(null);
+      }
+      prevSignalStatusRef.current = result.state;
+      setSignalStatus(result.state);
+    } catch {
+      // Background/poll-style fetch — a toast on every failed tick would be noisy.
+      // The initial mount call surfaces failures via `load()`'s own catch.
     }
+  }
+
+  // Fetches the Signal group list for the picker. Called from fetchSignalStatus()
+  // above every time it observes the `connected` state — i.e. on the exact
+  // same cadence as status itself (mount, tab focus, window focus, background
+  // poll). Errors go into a small inline message rather than a toast — this
+  // call can fail transiently (sidecar blip) and shouldn't read as alarming.
+  async function fetchSignalGroups() {
+    setLoadingSignalGroups(true);
+    setSignalGroupsError(null);
+    try {
+      const { groups } = await apiFetch<{ groups: SignalGroupSummary[] }>('settings/signal-config/groups');
+      setSignalGroups(groups);
+    } catch (err) {
+      setSignalGroupsError(err instanceof Error ? err.message : 'Could not load Signal groups');
+    } finally {
+      setLoadingSignalGroups(false);
+    }
+  }
+
+  // Manual "Refresh now" — the background sync only runs every ~60s, so this
+  // enqueues an immediate one-off run (apps/worker's existing consumer
+  // processes it, same job/queue as the repeatable one) and then re-fetches
+  // the cache shortly after, rather than just re-reading whatever's already
+  // cached (which could be up to a minute stale).
+  async function refreshSignalGroups() {
+    setRefreshingSignalGroups(true);
+    try {
+      await apiFetch('settings/signal-config/groups/sync', { method: 'POST' });
+      // The sync job normally finishes in well under a second (the worker is
+      // idle between its own ticks) — a short delay before re-fetching avoids
+      // a race where we'd read the cache before the job has actually run.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await fetchSignalGroups();
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not refresh Signal groups', message: err instanceof Error ? err.message : undefined });
+    } finally {
+      setRefreshingSignalGroups(false);
+    }
+  }
+
+  // Saves only the Signal-group selection — `PUT settings/signal-config` no
+  // longer accepts/touches `recipientNumber` at all (fallback numbers are now
+  // managed as their own list via the recipient-numbers endpoints below, hidden
+  // behind SIGNAL_FALLBACK_NUMBERS_ENABLED). "None" is a perfectly valid save
+  // here: alerts are group-only, so no group selected just means no alerts.
+  async function saveSignalGroup() {
+    const usingGroup = signalSelectedGroupId !== SIGNAL_NO_GROUP;
     setSavingSignal(true);
     try {
-      const updated = await apiFetch<SignalConfig>('settings/signal-config', {
+      const selectedGroup = usingGroup ? (signalGroups ?? []).find((g) => g.id === signalSelectedGroupId) : undefined;
+      await apiFetch('settings/signal-config', {
         method: 'PUT',
-        body: JSON.stringify({ senderNumber: signalSender.trim(), recipientNumber: signalRecipient.trim() }),
+        body: JSON.stringify({
+          senderNumber: signalSenderNumber,
+          recipientGroupId: usingGroup ? (selectedGroup?.id ?? signalSelectedGroupId) : null,
+          recipientGroupName: usingGroup ? (selectedGroup?.name ?? null) : null,
+          isActive: signalActive,
+        }),
       });
-      setSignal(updated);
-      toast({ type: 'success', title: 'Signal settings saved' });
+      toast({ type: 'success', title: 'Signal group selection saved' });
+      // Re-fetch rather than trust this response directly — status re-validates
+      // a group recipient against the sidecar's live list, which is the same
+      // source of truth the "sending alerts to" pill/warning above reads from.
+      await fetchSignalStatus();
     } catch (err) {
-      toast({ type: 'error', title: 'Could not save Signal settings', message: err instanceof Error ? err.message : undefined });
+      toast({ type: 'error', title: 'Could not save Signal group selection', message: err instanceof Error ? err.message : undefined });
     } finally {
       setSavingSignal(false);
     }
   }
+
+  async function toggleSignalActive(checked: boolean) {
+    const previous = signalActive;
+    setSignalActive(checked);
+    try {
+      const updated = await apiFetch<SignalConfig>('settings/signal-config', {
+        method: 'PUT',
+        body: JSON.stringify({
+          senderNumber: signalSenderNumber,
+          isActive: checked,
+        }),
+      });
+      setSignalActive(updated.isActive);
+    } catch (err) {
+      setSignalActive(previous);
+      toast({ type: 'error', title: 'Could not update Signal', message: err instanceof Error ? err.message : undefined });
+    }
+  }
+
+  async function sendSignalTest() {
+    setSendingSignalTest(true);
+    try {
+      await apiFetch<{ sent: true }>('settings/signal-config/test-send', { method: 'POST' });
+      toast({ type: 'success', title: 'Test message sent' });
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not send test message', message: err instanceof Error ? err.message : undefined });
+    } finally {
+      setSendingSignalTest(false);
+    }
+  }
+
+  async function disconnectSignal() {
+    setDisconnectingSignal(true);
+    try {
+      await apiFetch('settings/signal-config/disconnect', { method: 'POST' });
+      setSignalDisconnectConfirmOpen(false);
+      // Set directly rather than re-fetching through fetchSignalStatus() —
+      // this is a deliberate user action, not the silent drop that function
+      // watches for, and calling it here would false-positive the banner.
+      prevSignalStatusRef.current = 'not_configured';
+      setSignalStatus('not_configured');
+      setSignalStatusDetail(null);
+      setSignalDroppedBanner(false);
+      toast({ type: 'info', title: 'Signal disconnected' });
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not disconnect Signal', message: err instanceof Error ? err.message : undefined });
+    } finally {
+      setDisconnectingSignal(false);
+    }
+  }
+
+  // Mirrors addEmailRecipient()/removeEmailRecipient() exactly — same
+  // validation-before-send, same optimistic local-array update on success,
+  // same toast wording style, just a phone number instead of an email.
+  async function addSignalRecipientNumber() {
+    if (!newSignalRecipientNumber.trim()) {
+      toast({ type: 'error', title: 'Phone number required' });
+      return;
+    }
+    setAddingSignalRecipientNumber(true);
+    try {
+      const created = await apiFetch<SignalRecipientNumber>('settings/signal-config/recipient-numbers', {
+        method: 'POST',
+        body: JSON.stringify({ phoneNumber: newSignalRecipientNumber.trim() }),
+      });
+      setSignalRecipientNumbers((prev) => [...(prev ?? []), created]);
+      setNewSignalRecipientNumber('');
+      toast({ type: 'success', title: 'Fallback number added', message: created.phoneNumber });
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not add fallback number', message: err instanceof Error ? err.message : undefined });
+    } finally {
+      setAddingSignalRecipientNumber(false);
+    }
+  }
+
+  async function removeSignalRecipientNumber(id: string, phoneNumber: string) {
+    try {
+      await apiFetch(`settings/signal-config/recipient-numbers/${id}`, { method: 'DELETE' });
+      setSignalRecipientNumbers((prev) => (prev ?? []).filter((n) => n.id !== id));
+      toast({ type: 'info', title: 'Removed', message: phoneNumber });
+    } catch (err) {
+      toast({ type: 'error', title: 'Could not remove fallback number', message: err instanceof Error ? err.message : undefined });
+    }
+  }
+
+  function openSignalLinkModal() {
+    setSignalQrDataUrl(null);
+    setSignalQrError(null);
+    setSignalStatus('connecting');
+    setSignalLinkModalOpen(true);
+  }
+
+  // Any close of the link modal — success, Escape, overlay click, Cancel —
+  // re-fetches the real status so `connecting` never gets stuck if the user
+  // backs out before scanning.
+  function closeSignalLinkModal() {
+    setSignalLinkModalOpen(false);
+    fetchSignalStatus();
+  }
+
+  // Fetches the QR code + polls link status while the modal is open; tears
+  // both intervals down on close/unmount (success, Escape, overlay click, or
+  // the component unmounting) so nothing leaks.
+  useEffect(() => {
+    if (!signalLinkModalOpen) return;
+    let cancelled = false;
+
+    async function fetchQr(isRefresh: boolean) {
+      if (isRefresh) setSignalQrRefreshing(true);
+      try {
+        // No deviceName query param — let the backend's own fixed default
+        // apply, so the same name is used both when generating this QR code
+        // and when signal-connect.service.ts later looks up "our" device
+        // among possibly several linked to the same number.
+        const { dataUrl } = await apiFetch<{ dataUrl: string }>('settings/signal-config/link/qrcode');
+        if (!cancelled) {
+          setSignalQrDataUrl(dataUrl);
+          setSignalQrError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : 'Could not load the QR code';
+          // On the FIRST fetch there's no QR shown yet at all — the modal must show
+          // this error instead of spinning forever (there's no image to fall back
+          // to). On a background refresh, keep showing the last good QR rather
+          // than replacing it with an error — just toast, matching a transient blip.
+          if (isRefresh) {
+            toast({ type: 'error', title: 'Could not refresh QR code', message });
+          } else {
+            setSignalQrError(message);
+          }
+        }
+      } finally {
+        if (!cancelled && isRefresh) setSignalQrRefreshing(false);
+      }
+    }
+
+    async function pollLinkStatus() {
+      try {
+        const result = await apiFetch<{ linked: boolean; senderNumber?: string }>('settings/signal-config/link/status');
+        if (!cancelled && result.linked) {
+          cancelled = true;
+          clearInterval(qrTimer);
+          clearInterval(pollTimer);
+          setSignalLinkModalOpen(false);
+          toast({
+            type: 'success',
+            title: 'Signal linked',
+            message: result.senderNumber ? `Connected as ${result.senderNumber}` : undefined,
+          });
+          fetchSignalStatus();
+        }
+      } catch {
+        // Transient poll failure — keep trying on the next tick rather than toasting every 2-3s.
+      }
+    }
+
+    fetchQr(false);
+    const qrTimer = setInterval(() => fetchQr(true), 50000);
+    const pollTimer = setInterval(pollLinkStatus, 2500);
+
+    return () => {
+      cancelled = true;
+      clearInterval(qrTimer);
+      clearInterval(pollTimer);
+    };
+    // Keyed on signalLinkModalOpen + signalQrRetryTick only — re-running this
+    // effect on every render (e.g. from fetchSignalStatus/toast being
+    // re-created) would restart both timers instead of letting them run
+    // their full interval. signalQrRetryTick is a deliberate manual bump
+    // (Retry button) to force a fresh attempt after a failed initial fetch.
+  }, [signalLinkModalOpen, signalQrRetryTick]);
+
+  // Signal is a live external system that can change without any action in
+  // this UI, so its status is re-fetched beyond just the initial mount load:
+  // whenever this tab becomes active, whenever the window regains focus, and
+  // on a light background poll (this last one is what lets the cross-cutting
+  // banner notice a link dropping while the user isn't even looking at this tab).
+  useEffect(() => {
+    if (activeTab === 'signal') fetchSignalStatus();
+  }, [activeTab]);
+
+  // Fallback phone-number list — hidden behind SIGNAL_FALLBACK_NUMBERS_ENABLED
+  // (state/effect kept, not deleted). Still on its own "becoming connected
+  // while this tab is active" trigger, fetching from its own CRUD endpoint
+  // (same pattern as `emailRecipients`).
+  useEffect(() => {
+    if (activeTab === 'signal' && signalStatus === 'connected' && signalRecipientNumbers === null) {
+      apiFetch<SignalRecipientNumber[]>('settings/signal-config/recipient-numbers')
+        .then(setSignalRecipientNumbers)
+        .catch((err) => toast({ type: 'error', title: 'Could not load fallback numbers', message: err.message }));
+    }
+  }, [activeTab, signalStatus, signalRecipientNumbers]);
+
+  useEffect(() => {
+    function onFocus() {
+      fetchSignalStatus();
+    }
+    window.addEventListener('focus', onFocus);
+    const poll = setInterval(fetchSignalStatus, 20000);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      clearInterval(poll);
+    };
+    // Mount-once subscription — fetchSignalStatus is re-created each render but
+    // only reads refs/calls setters, so the closure captured here never goes stale.
+  }, []);
 
   async function addEmailRecipient() {
     if (!newEmail.trim()) {
@@ -253,6 +660,32 @@ export default function NotificationsPage() {
         <Breadcrumb section={breadcrumbSiteName} page="Notifications" />
       </Topbar>
       <div className="flex-1 p-6">
+        <IncidentBanner className="max-w-[560px]">
+          {(signalStatus === 'sidecar_unreachable' || signalDroppedBanner) && !signalBannerDismissed ? (
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+              <div>
+                <span className="font-semibold">Signal alerts aren&apos;t being delivered.</span>{' '}
+                <span className="text-red/85">Reconnect Signal to keep receiving downtime alerts.</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={() => {
+                    setActiveTab('signal');
+                    signalTabRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }}
+                >
+                  Go to Signal
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setSignalBannerDismissed(true)}>
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </IncidentBanner>
+
         <Card className="max-w-[560px]">
           <CardHeader>
             <CardTitle>Notifications</CardTitle>
@@ -263,7 +696,7 @@ export default function NotificationsPage() {
             <div className="px-6 pb-6 text-sm text-text-muted">Loading…</div>
           ) : (
             <div className="px-5 pb-5">
-              <Tabs defaultValue="telegram">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value="telegram">Telegram</TabsTrigger>
                   <TabsTrigger value="signal">Signal</TabsTrigger>
@@ -324,32 +757,167 @@ export default function NotificationsPage() {
                   ) : null}
                 </TabsContent>
 
-                <TabsContent value="signal">
-                  <div className="mb-3.5">
-                    <FieldLabel>Sender phone number</FieldLabel>
-                    <Input
-                      value={signalSender}
-                      onChange={(e) => setSignalSender(e.target.value)}
-                      placeholder="+15550000000"
-                      disabled={!canUpdate}
-                    />
-                    <Hint>The number registered with signal-cli-rest-api</Hint>
-                  </div>
-                  <div className="mb-3.5">
-                    <FieldLabel>Recipient number</FieldLabel>
-                    <Input
-                      value={signalRecipient}
-                      onChange={(e) => setSignalRecipient(e.target.value)}
-                      placeholder="+15551111111"
-                      disabled={!canUpdate}
-                    />
-                    <Hint>Who receives the alert messages</Hint>
-                  </div>
-                  {canUpdate ? (
-                    <Button size="sm" onClick={saveSignal} disabled={savingSignal}>
-                      {savingSignal ? 'Saving…' : signal ? 'Update Signal settings' : 'Save Signal settings'}
-                    </Button>
-                  ) : null}
+                <TabsContent value="signal" ref={signalTabRef}>
+                  {signalStatus === null ? (
+                    <div className="text-[13px] text-text-muted">Loading…</div>
+                  ) : signalStatus === 'sidecar_unreachable' ? (
+                    <div>
+                      <div className="mb-2">
+                        <Badge status="down" label="Sidecar unreachable" />
+                      </div>
+                      <div className="rounded border border-red-border bg-red-bg px-3 py-2.5 text-[13px] text-red">
+                        {signalStatusDetail ?? 'The Signal sidecar (signal-cli-rest-api) could not be reached.'}
+                      </div>
+                      <Hint>Check SIGNAL_REST_API_URL and that the sidecar container is running, then reopen this tab.</Hint>
+                    </div>
+                  ) : signalStatus === 'connecting' ? (
+                    <div className="text-[13px] text-text-muted">Waiting for the QR code to be scanned…</div>
+                  ) : signalStatus === 'connected' ? (
+                    <div>
+                      <div className="mb-1 flex items-center gap-2">
+                        <Badge status="up" label="Connected" />
+                        <span className="font-mono text-[13px] text-text">{formatPhoneNumber(signalSenderNumber)}</span>
+                      </div>
+                      {signalDeviceName ? (
+                        <Hint>
+                          Linked as <span className="font-medium text-text">{signalDeviceName}</span>
+                          {signalLinkedAt
+                            ? `, since ${new Date(signalLinkedAt).toLocaleDateString(undefined, {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                              })}`
+                            : ''}
+                        </Hint>
+                      ) : null}
+
+                      <div className="mb-3.5 mt-3.5">
+                        {signalActiveRecipient ? (
+                          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-blue-border bg-blue-bg px-2.5 py-1 text-[12.5px] font-medium text-blue">
+                            <span aria-hidden="true">→</span>
+                            {signalActiveRecipient.name}
+                          </span>
+                        ) : (
+                          <div className="rounded border border-yellow-border bg-yellow-bg px-3 py-2.5 text-[13px] text-yellow">
+                            No recipient selected — Signal alerts won&apos;t be sent until you choose a group below.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mb-3.5">
+                        <div className="mb-1.5 flex items-center justify-between gap-2">
+                          <FieldLabel>Signal group</FieldLabel>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={refreshSignalGroups}
+                            disabled={refreshingSignalGroups}
+                          >
+                            {refreshingSignalGroups ? 'Refreshing…' : 'Refresh now'}
+                          </Button>
+                        </div>
+                        <Select value={signalSelectedGroupId} onValueChange={setSignalSelectedGroupId} disabled={!canUpdate}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={SIGNAL_NO_GROUP}>None selected — no Signal alerts will be sent</SelectItem>
+                            {(signalGroups ?? []).map((group) => (
+                              <SelectItem key={group.id} value={group.id}>
+                                {group.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {signalGroupsError ? (
+                          <Hint>Couldn&apos;t load groups: {signalGroupsError}</Hint>
+                        ) : loadingSignalGroups && signalGroups === null ? (
+                          <Hint>Loading Signal groups…</Hint>
+                        ) : null}
+                      </div>
+
+                      {SIGNAL_FALLBACK_NUMBERS_ENABLED ? (
+                        <div className="mb-3.5">
+                          <FieldLabel>Fallback phone numbers</FieldLabel>
+                          <Hint>
+                            These numbers receive alerts whenever no Signal group is selected above (or if a selected group
+                            becomes unavailable) — every active number gets the alert independently.
+                          </Hint>
+                          <div className="mb-2 mt-2 flex flex-col gap-2">
+                            {(signalRecipientNumbers ?? []).map((recipient) => (
+                              <div
+                                key={recipient.id}
+                                className="flex items-center justify-between gap-2 rounded border border-border bg-bg-secondary px-3 py-2"
+                              >
+                                <span className="truncate font-mono text-[13px] text-text">{recipient.phoneNumber}</span>
+                                {canUpdate ? (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => removeSignalRecipientNumber(recipient.id, recipient.phoneNumber)}
+                                  >
+                                    Remove
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ))}
+                            {signalRecipientNumbers !== null && signalRecipientNumbers.length === 0 ? (
+                              <div className="text-[13px] text-text-muted">No fallback numbers yet.</div>
+                            ) : null}
+                          </div>
+                          {canUpdate ? (
+                            <div className="flex gap-2">
+                              <Input
+                                value={newSignalRecipientNumber}
+                                onChange={(e) => setNewSignalRecipientNumber(e.target.value)}
+                                placeholder="+15551111111"
+                                className="flex-1"
+                              />
+                              <Button onClick={addSignalRecipientNumber} disabled={addingSignalRecipientNumber}>
+                                {addingSignalRecipientNumber ? 'Adding…' : 'Add'}
+                              </Button>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+
+                      <div className="mb-4">
+                        <FieldLabel>Active</FieldLabel>
+                        <div className="mt-1.5 flex items-center gap-2.5">
+                          <Toggle checked={signalActive} onCheckedChange={toggleSignalActive} disabled={!canUpdate} />
+                          <span className="text-[13px] text-text-muted">Send Signal alerts to the recipient above</span>
+                        </div>
+                      </div>
+
+                      {canUpdate ? (
+                        <div className="flex flex-wrap gap-2">
+                          <Button size="sm" onClick={saveSignalGroup} disabled={savingSignal}>
+                            {savingSignal ? 'Saving…' : 'Save group selection'}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={sendSignalTest} disabled={sendingSignalTest}>
+                            {sendingSignalTest ? 'Sending…' : 'Send test message'}
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setSignalDisconnectConfirmOpen(true)}>
+                            Disconnect
+                          </Button>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div>
+                      <ol className="mb-4 list-decimal space-y-1.5 pl-5 text-[13px] text-text-muted">
+                        <li>Have Signal installed on the phone that will send alerts.</li>
+                        <li>
+                          Click <span className="font-medium text-text">Link Signal</span> below.
+                        </li>
+                        <li>Scan the code with that phone: Signal app → Settings → Linked Devices → Link New Device.</li>
+                        <li>Set who receives the alerts.</li>
+                      </ol>
+                      <Button size="sm" onClick={openSignalLinkModal} disabled={!canUpdate}>
+                        Link Signal
+                      </Button>
+                    </div>
+                  )}
                 </TabsContent>
 
                 {/* Radix's TabsContent mounts its children regardless of which tab is active (only toggles visibility), so this must be skipped
@@ -505,6 +1073,52 @@ export default function NotificationsPage() {
           )}
         </Card>
       </div>
+
+      <Modal
+        open={signalLinkModalOpen}
+        onClose={closeSignalLinkModal}
+        title="Link Signal"
+        description="Scan this code with the Signal app on the phone that will send alerts."
+      >
+        <div className="flex flex-col items-center gap-3">
+          <div className="relative flex size-[220px] items-center justify-center overflow-hidden rounded border border-border bg-bg-secondary">
+            {signalQrDataUrl ? (
+              // `data:` URL QR code, not an optimizable Next asset — plain <img>, matching ImageUpload's own pattern.
+              <img src={signalQrDataUrl} alt="Signal linking QR code" className="size-full object-contain p-2" />
+            ) : signalQrError ? (
+              <div className="flex flex-col items-center gap-2 px-3 text-center">
+                <Badge status="down" label="Couldn't load QR code" />
+                <span className="text-xs text-text-muted">{signalQrError}</span>
+                <Button size="sm" variant="outline" onClick={() => setSignalQrRetryTick((n) => n + 1)}>
+                  Retry
+                </Button>
+              </div>
+            ) : (
+              <span className="text-[13px] text-text-muted">Loading QR code…</span>
+            )}
+            {signalQrRefreshing ? (
+              <div className="absolute inset-0 flex items-center justify-center bg-bg/80 text-[13px] text-text-muted">
+                Refreshing…
+              </div>
+            ) : null}
+          </div>
+          <ol className="w-full list-decimal space-y-1 pl-5 text-[13px] text-text-muted">
+            <li>Have Signal installed on the phone that will send alerts.</li>
+            <li>Scan the code above with that phone.</li>
+            <li>Signal app → Settings → Linked Devices → Link New Device.</li>
+            <li>Set who receives the alerts once linked.</li>
+          </ol>
+        </div>
+      </Modal>
+
+      <ConfirmDialog
+        open={signalDisconnectConfirmOpen}
+        onClose={() => setSignalDisconnectConfirmOpen(false)}
+        onConfirm={disconnectSignal}
+        title="Disconnect Signal?"
+        description="This unlinks the connected phone number. You'll need to scan a new QR code to reconnect."
+        confirmLabel={disconnectingSignal ? 'Disconnecting…' : 'Disconnect'}
+      />
     </PermissionGate>
   );
 }

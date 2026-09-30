@@ -1,7 +1,7 @@
 import { Queue, QueueOptions, Worker, WorkerOptions, Processor } from 'bullmq';
 import { getRedisConnection } from './connection';
 import { QUEUE_NAMES } from './queue-names';
-import { MonitorCheckJobData, AlertDispatchJobData, CleanupJobData } from './job-types';
+import { MonitorCheckJobData, AlertDispatchJobData, CleanupJobData, SignalGroupsSyncJobData } from './job-types';
 
 /** Never construct a `Queue`/`Worker` directly — always go through these factories so every consumer shares the one Redis connection. */
 export function createQueue<T>(name: string, opts?: Partial<QueueOptions>): Queue<T> {
@@ -26,4 +26,8 @@ export function createAlertDispatchQueue(opts?: Partial<QueueOptions>) {
 
 export function createCleanupQueue(opts?: Partial<QueueOptions>) {
   return createQueue<CleanupJobData>(QUEUE_NAMES.CLEANUP, opts);
+}
+
+export function createSignalGroupsSyncQueue(opts?: Partial<QueueOptions>) {
+  return createQueue<SignalGroupsSyncJobData>(QUEUE_NAMES.SIGNAL_GROUPS_SYNC, opts);
 }

@@ -18,3 +18,6 @@ export interface AlertDispatchJobData {
 
 /** Payload for the daily `cleanup` job — trims each Monitor's MonitorCheck rows to the newest 500. No fields needed. */
 export type CleanupJobData = Record<string, never>;
+
+/** Payload for the ~60s `signal-groups-sync` job — refreshes the local SignalGroup cache from signal-cli-rest-api. No fields needed. */
+export type SignalGroupsSyncJobData = Record<string, never>;

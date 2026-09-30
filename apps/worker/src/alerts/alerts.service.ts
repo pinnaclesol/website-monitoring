@@ -61,7 +61,7 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
     const name = monitor.label || monitor.domain;
     const message = buildAlertMessage(name, event, occurredAt, downtimeMs);
 
-    const [telegramSentCount, , emailCount] = await Promise.all([
+    const [telegramSentCount, signalSentCount, emailCount] = await Promise.all([
       this.sendTelegramAlerts(message),
       this.sendSignalAlert(message),
       this.prisma.emailRecipient.count({ where: { isActive: true } }),
@@ -69,7 +69,8 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(
       `Dispatched "${event}" alert for ${name} — Telegram sent to ${telegramSentCount} destination(s), ` +
-        `Signal attempted, email (${emailCount} recipient(s)) still stubbed`
+        `Signal sent to ${signalSentCount} group(s) (group-only, fallback numbers disabled), ` +
+        `email (${emailCount} recipient(s)) still stubbed`
     );
   }
 
@@ -111,38 +112,58 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Reads SignalConfig fresh from the DB every call (never cached) and
-   * POSTs to the sidecar's `/v2/send`. Silently no-ops if Signal isn't
-   * configured/active — that's a normal state, not an error. Never logs the
-   * sender/recipient numbers or the upstream response body (which could
-   * itself echo the numbers back) — only counts/status codes, matching
-   * this app's secrets discipline for phone numbers.
+   * Reads SignalConfig fresh from the DB every call (never cached).
+   * Silently no-ops if Signal isn't configured/active — that's a normal
+   * state, not an error. Never logs the sender/recipient numbers, group
+   * id, or the upstream response body (which could itself echo them back)
+   * — only counts/status codes, matching this app's secrets discipline for
+   * phone numbers.
+   *
+   * GROUP-ONLY FOR NOW (product decision): fallback-number sending is
+   * temporarily disabled — if `recipientGroupId` isn't set, this returns 0
+   * with no send attempt at all (not an error/warning, just "no group
+   * configured yet"). This mirrors the equivalent frontend flag
+   * (`SIGNAL_FALLBACK_NUMBERS_ENABLED = false` in apps/web's Notifications
+   * page); re-enabling both sides symmetrically is the whole revert if the
+   * fallback-number path comes back. `SignalRecipientNumber` rows/CRUD are
+   * untouched — only unused here. `recipientGroupId` is already in the
+   * literal "group.<base64>" format signal-cli-rest-api's `recipients`
+   * array expects, so no transformation is needed. Returns how many sends
+   * actually succeeded (a group send counts as 1 destination if it
+   * succeeds), for the summary log line.
    */
-  private async sendSignalAlert(message: string): Promise<void> {
+  private async sendSignalAlert(message: string): Promise<number> {
     const config = await this.prisma.signalConfig.findFirst({ where: { isActive: true } });
-    if (!config) return;
+    if (!config || !config.recipientGroupId) return 0;
 
     const apiUrl = process.env.SIGNAL_REST_API_URL;
     if (!apiUrl) {
       this.logger.warn('SignalConfig is active but SIGNAL_REST_API_URL is not set — skipping Signal alert');
-      return;
+      return 0;
     }
 
+    return (await this.postSignalMessage(apiUrl, config.senderNumber, config.recipientGroupId, message)) ? 1 : 0;
+  }
+
+  private async postSignalMessage(apiUrl: string, senderNumber: string, recipient: string, message: string): Promise<boolean> {
     try {
       const res = await fetch(`${apiUrl.replace(/\/+$/, '')}/v2/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message,
-          number: config.senderNumber,
-          recipients: [config.recipientNumber],
+          number: senderNumber,
+          recipients: [recipient],
         }),
       });
       if (!res.ok) {
         this.logger.error(`Signal send failed (HTTP ${res.status})`);
+        return false;
       }
+      return true;
     } catch (err) {
       this.logger.error(`Signal send error: ${err instanceof Error ? err.message : 'unknown error'}`);
+      return false;
     }
   }
 }

@@ -220,15 +220,59 @@ model TelegramAccount {
 /// Signal sender/recipient pairing. Single config (not multi-account) —
 /// requires a running signal-cli-rest-api sidecar with a registered phone
 /// number, so this models an infra-bound integration, not just a credential.
+/// Recipient can be either a plain number or a Signal group: if
+/// `recipientGroupId` is set, that's the active recipient; otherwise fall
+/// back to the fallback numbers in `SignalRecipientNumber`. Both can be
+/// populated at once by design — fallback numbers are deliberately kept
+/// saved even while a group is the active recipient, so if the group is
+/// later deleted/left, sends can automatically fall back to the still-saved
+/// numbers instead of going silently dark.
 model SignalConfig {
-  id              String   @id @default(cuid())
-  senderNumber    String
-  recipientNumber String
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  senderNumber       String
+  recipientGroupId   String? // Signal group's `id`, verbatim "group.<base64>" format as returned by GET /v1/groups/{number} and expected by /v2/send's `recipients` array — no transformation needed. Takes priority over the SignalRecipientNumber list when set.
+  recipientGroupName String? // group's last-known display name, cached for UI display without a live lookup
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   @@map("SignalConfig")
+}
+
+/// A fallback phone number alerts are sent to when no Signal group is
+/// selected as the recipient (or a selected group later becomes
+/// unavailable) — every active row receives the alert independently, same
+/// pattern as `TelegramAccount`/`EmailRecipient` (one destination failing
+/// never blocks the others). Replaces the old single `SignalConfig.
+/// recipientNumber` field with a proper list, same shape as
+/// `EmailRecipient`.
+model SignalRecipientNumber {
+  id          String   @id @default(cuid())
+  phoneNumber String   @unique
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("SignalRecipientNumber")
+}
+
+/// A local cache of the Signal groups known to the signal-cli-rest-api
+/// sidecar. Kept in sync every ~60s by a background job in apps/worker (not
+/// built here) that diffs the sidecar's live `GET /v1/groups/{number}`
+/// response against this table — upserting changed/new groups and deleting
+/// rows for groups that no longer exist on Signal's side (left, deleted,
+/// etc.). `SignalConfig.recipientGroupId` references a `groupId` here by
+/// convention only, not a formal foreign key: this table can be briefly out
+/// of sync with Signal's real state between sync ticks, by design — the
+/// background job is what reconciles them, not request-time joins.
+model SignalGroup {
+  id        String   @id @default(cuid())
+  groupId   String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("SignalGroup")
 }
 
 /// The SMTP relay email alerts are sent through — single config (not

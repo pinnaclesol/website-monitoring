@@ -35,6 +35,8 @@
 services:
   postgres:
     image: postgres:17-alpine
+    ports:
+      - "5433:5432"   # host:container — 5433 to avoid clashing with any local Postgres on 5432
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -88,6 +90,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      signal-cli-rest-api:
+        condition: service_started
     ports:
       - '4001:4001'
     volumes:
@@ -133,6 +137,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      signal-cli-rest-api:
+        condition: service_started
     ports:
       - '4002:4002'
     volumes:
@@ -142,6 +148,29 @@ services:
       - /app/libs/uptime-db/src/generated
     init: true
 
+  # Local counterpart to production's Signal sidecar (see
+  # docker-compose.prod.yml once Phase 2 lands) — lets the Connect Signal
+  # flow be built and fully tested locally before touching any server.
+  # json-rpc mode matches the proven config from another client project's
+  # working Signal integration (not just normal's default). The named
+  # volume is what makes a linked phone number survive `docker compose
+  # down`/rebuilds — losing it means re-scanning a QR code to relink.
+  signal-cli-rest-api:
+    image: bbernhard/signal-cli-rest-api:latest
+    environment:
+      MODE: json-rpc
+    # Matches another client project's proven working config — without an
+    # explicit resolver, linking requests to Signal's own servers can fail
+    # with "Link request error: Connection closed!" inside Docker's default
+    # DNS setup.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    volumes:
+      - signal_data:/home/.local/share/signal-cli
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:
+  signal_data:
