@@ -16,12 +16,11 @@ Three apps, each its own Docker image — never merged together:
 
 Postgres and Redis are **not** containers this repo runs in production — they're externally managed (DigitalOcean Managed Databases). Locally, `docker-compose.dev.yml` runs throwaway Postgres/Redis containers for convenience only.
 
-In production this is split across **two separate servers**, on purpose — a slow/hanging check against an arbitrary external site must never be able to degrade the login/dashboard:
+In production all three run on **one combined server** (`docker-compose.prod.yml`): `api` + `web` + `worker` containers, plus a single `nginx` reverse-proxying `/admin/queues` and `/health` to `worker` and everything else to `web` — nginx is the only container with a published port; `api` has none, so it's unreachable except from `web`/`nginx` on the compose network. (Split across two servers previously — see git history around `docker-compose.web-api.yml`/`docker-compose.worker.yml` — consolidated onto one for cost/simplicity. `worker` now shares this box's resources with the dashboard, a tradeoff worth revisiting if check volume grows enough to matter — see `docker-compose.prod.yml`'s header comment.)
 
-- **Server 1 ("app")** — `docker-compose.web-api.yml`: `api` + `web` containers + an `nginx` container reverse-proxying to `web` (nginx is the only container with a published port; `api` has none, so it's unreachable except from `web`/`nginx` on the compose network).
-- **Server 2 ("worker")** — `docker-compose.worker.yml`: `worker` container + its own `nginx` container fronting Bull Board/`/health`.
+The server currently runs **plain HTTP** (no domain/TLS wired up yet — see "Adding HTTPS back" below).
 
-Both servers currently run **plain HTTP** (no domain/TLS wired up yet — see "Adding HTTPS back" below).
+Pushing to `main` auto-deploys — see `.github/workflows/deploy.yml`, which SSHes in and runs `scripts/redeploy.sh` on every push.
 
 ## Local development
 
@@ -131,33 +130,20 @@ npm run serve:worker  # :4002
 
 ## Production deployment
 
-Each server is a standalone `docker compose` stack — no shared state between them beyond the managed Postgres/Redis both connect to.
+One `docker compose` stack for the whole server (`docker-compose.prod.yml`) — no shared state beyond the managed Postgres/Redis all three apps connect to.
+
+**Auto-deploy**: every push to `main` triggers `.github/workflows/deploy.yml`, which SSHes into the server and runs `scripts/redeploy.sh` — no manual step needed for an ordinary code change. Requires the repo secrets `DEPLOY_SSH_KEY` (private key authorized on the server) and `APP_SERVER_HOST` already configured in GitHub.
 
 ### First-time server setup
 
 ```bash
-# On a fresh Ubuntu droplet, as root:
-curl -fsSL https://raw.githubusercontent.com/pinnaclesol/website-monitoring/main/scripts/server-init.sh -o server-init.sh
-# edit server-init.sh: fill in GITHUB_REPO_URL / PRIVATE_KEY_CONTENT (or clone by hand)
-chmod +x server-init.sh && ./server-init.sh
-```
-
-`scripts/server-init.sh` installs Docker, sets up SSH access, clones the repo, configures the firewall (22/80/443), and sets up a 2GB swapfile. See its header for what each step does.
-
-Then, per server:
-
-```bash
+# On a fresh Ubuntu droplet, as root — clone the repo by hand, install
+# Docker (`curl -fsSL https://get.docker.com | sh`), set up SSH access,
+# open the firewall (22/80/443).
 cd /var/www/website-monitoring
-
-# Server 1 ("app"):
-cp .env.web-api.example .env.web-api
-nano .env.web-api    # fill in DATABASE_URL, REDIS_URL, INTERNAL_API_KEY, NEXTAUTH_SECRET, NEXTAUTH_URL
-docker compose -f docker-compose.web-api.yml up -d --build
-
-# Server 2 ("worker"):
-cp .env.worker.example .env.worker
-nano .env.worker      # fill in DATABASE_URL, REDIS_URL, BULL_BOARD_USER/PASS
-docker compose -f docker-compose.worker.yml up -d --build
+cp .env.prod.example .env.prod
+nano .env.prod    # fill in DATABASE_URL, REDIS_URL, INTERNAL_API_KEY, NEXTAUTH_SECRET, NEXTAUTH_URL, BULL_BOARD_USER/PASS
+docker compose -f docker-compose.prod.yml up -d --build
 ```
 
 Generate the two secrets with:
@@ -167,23 +153,23 @@ openssl rand -hex 32      # INTERNAL_API_KEY
 openssl rand -base64 32   # NEXTAUTH_SECRET
 ```
 
-### Redeploying (after the first setup)
+### Redeploying manually (after the first setup)
 
 ```bash
-./scripts/redeploy.sh docker-compose.web-api.yml    # or docker-compose.worker.yml
+./scripts/redeploy.sh docker-compose.prod.yml
 ```
 
-Pulls latest `main`, rebuilds only what changed (Docker layer cache), restarts, and prunes old images. `api`'s container entrypoint runs `prisma migrate deploy` on every start — pending migrations apply automatically, no separate migration step needed.
+Pulls latest `main`, rebuilds only what changed (Docker layer cache), restarts, and prunes old images. `api`'s container entrypoint runs `prisma migrate deploy` on every start — pending migrations apply automatically, no separate migration step needed. This is exactly what the GitHub Actions workflow runs automatically on every push.
 
 ### Adding HTTPS back
 
-Both `nginx/*.conf.template` files currently serve plain HTTP (`listen 80 default_server`). Once a domain is pointed at a server:
+`nginx/prod.conf.template` currently serves plain HTTP (`listen 80 default_server`). Once a domain is pointed at the server:
 
-1. Add `DOMAIN=` / `CERTBOT_EMAIL=` back to that server's `.env.*` file.
-2. Restore the `443 ssl` server block + `ssl_certificate`/`ssl_certificate_key` lines in that server's `nginx/*.conf.template` (see git history — commits `e500d7d`/`b995494` removed them).
-3. Add back the `certbot` service + `certbot_certs`/`certbot_webroot` volumes in that server's `docker-compose.*.yml`.
-4. For `.env.web-api`, switch `NEXTAUTH_URL` to `https://` (plain `http://` was needed so NextAuth doesn't mark the session cookie `Secure`-only).
-5. Run `./scripts/init-letsencrypt.sh web-api` (or `worker`) instead of a plain `docker compose up` for the first HTTPS boot — it bootstraps a temporary self-signed cert so nginx can start, then swaps in the real Let's Encrypt certificate. `docker compose up -d --build` (what `redeploy.sh` runs) is all you need after that; renewal is automatic.
+1. Add `DOMAIN=` / `CERTBOT_EMAIL=` back to `.env.prod`.
+2. Restore the `443 ssl` server block + `ssl_certificate`/`ssl_certificate_key` lines in `nginx/prod.conf.template` (see git history — commits `e500d7d`/`b995494` removed the equivalent lines from the old per-server templates).
+3. Add back the `certbot` service + `certbot_certs`/`certbot_webroot` volumes in `docker-compose.prod.yml`.
+4. Switch `NEXTAUTH_URL` in `.env.prod` to `https://` (plain `http://` was needed so NextAuth doesn't mark the session cookie `Secure`-only).
+5. Run `./scripts/init-letsencrypt.sh prod` instead of a plain `docker compose up` for the first HTTPS boot — it bootstraps a temporary self-signed cert so nginx can start, then swaps in the real Let's Encrypt certificate. `docker compose up -d --build` (what `redeploy.sh` runs) is all you need after that; renewal is automatic.
 
 ## Manual Docker commands (without compose)
 
@@ -205,17 +191,17 @@ Each Dockerfile is multi-stage (`deps` → `build` → `production`) — `--targ
 docker network create uptime-net    # once
 
 docker run -d --name api --network uptime-net \
-  --env-file .env.web-api \
+  --env-file .env.prod \
   website-monitoring-api
 
 docker run -d --name web --network uptime-net \
-  --env-file .env.web-api \
+  --env-file .env.prod \
   -e API_URL=http://api:4001 \
   -p 4000:4000 \
   website-monitoring-web
 
 docker run -d --name worker --network uptime-net \
-  --env-file .env.worker \
+  --env-file .env.prod \
   -p 4002:4002 \
   website-monitoring-worker
 ```
@@ -223,7 +209,7 @@ docker run -d --name worker --network uptime-net \
 **Run a one-off command inside a built image** (e.g. seeding, without starting the app):
 
 ```bash
-docker run --rm --network uptime-net --env-file .env.web-api website-monitoring-api npm run uptime:seed
+docker run --rm --network uptime-net --env-file .env.prod website-monitoring-api npm run uptime:seed
 ```
 
 **Inspect / debug:**
@@ -242,7 +228,7 @@ docker rm api web worker
 docker network rm uptime-net
 ```
 
-In practice, prefer `docker compose -f docker-compose.web-api.yml ...` / `docker-compose.worker.yml` (or `scripts/redeploy.sh`) over the manual commands above — compose already wires up the network, env files, and nginx for you; the manual form above is mainly for isolating/debugging one container.
+In practice, prefer `docker compose -f docker-compose.prod.yml ...` (or `scripts/redeploy.sh`) over the manual commands above — compose already wires up the network, env files, and nginx for you; the manual form above is mainly for isolating/debugging one container.
 
 ## Build / lint / typecheck
 

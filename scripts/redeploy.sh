@@ -1,9 +1,12 @@
 #!/bin/bash
-# Pulls the latest code and rebuilds/restarts one server's containers.
+# Pulls the latest code and rebuilds/restarts the single-server production stack.
 # Run from the repo root:
 #   ./scripts/redeploy.sh
 # Or specify a custom compose file:
 #   ./scripts/redeploy.sh docker-compose.prod.yml
+#
+# Also what .github/workflows/deploy.yml runs automatically over SSH on
+# every push to main.
 #
 # `docker compose up -d --build` only rebuilds images whose build context
 # actually changed (Docker's own layer cache) — safe to run after every

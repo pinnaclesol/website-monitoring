@@ -1,11 +1,15 @@
-# Single-server production Docker Compose stack running:
-# - `api`: NestJS backend (port 4001 internal, BullMQ check producer)
-# - `web`: Next.js frontend (port 4000 internal)
-# - `worker`: NestJS background worker (port 4002 internal, BullMQ consumer, check engine)
-# - `signal-bridge`: Signal CLI REST API sidecar (port 8080 internal)
-# - `nginx`: Single public reverse proxy on port 80 (and 443 if SSL configured)
+# Single combined DigitalOcean VPS running `api` + `web` + `worker` + `signal-bridge`,
+# plus nginx as a reverse proxy — all services consolidated onto one server.
+# Postgres/Redis are externally managed (DigitalOcean Managed Databases).
 #
-# Env: copy .env.prod.example -> .env.production and fill in your values.
+# Plain HTTP for now — no TLS/Let's Encrypt here (see nginx/prod.conf.template).
+#
+# Env: copy .env.prod.example -> .env.prod (or .env.production) and fill in real values.
+#
+# `api` publishes NO host port — only reachable by other containers on this
+# compose network (`web`'s server-side proxy talks to it at http://api:4001).
+# nginx is the only container with a host port (80), and it forwards to
+# `web:4000` (default) or `worker:4002` (/admin/queues, /worker-health, /health).
 
 services:
   api:
@@ -14,7 +18,10 @@ services:
       dockerfile: Dockerfile.api
       target: production
     env_file:
-      - .env.production
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
     environment:
       SIGNAL_REST_API_URL: http://signal-bridge:8080
     depends_on:
@@ -30,7 +37,10 @@ services:
       dockerfile: Dockerfile.web
       target: production
     env_file:
-      - .env.production
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
     environment:
       API_URL: http://api:4001
       SIGNAL_REST_API_URL: http://signal-bridge:8080
@@ -39,6 +49,8 @@ services:
     expose:
       - '4000'
     volumes:
+      # Persists uploaded branding images (apps/web/app/api/upload/route.ts)
+      # across redeploys — writes to /app/apps/web/public/uploads.
       - uploads_data:/app/apps/web/public/uploads
     init: true
     restart: unless-stopped
@@ -49,7 +61,10 @@ services:
       dockerfile: Dockerfile.worker
       target: production
     env_file:
-      - .env.production
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
     environment:
       SIGNAL_REST_API_URL: http://signal-bridge:8080
     depends_on:
@@ -77,6 +92,8 @@ services:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx/prod.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # Served directly by nginx (see nginx/prod.conf.template's /uploads/
+      # location) instead of proxied to `web`.
       - uploads_data:/uploads:ro
     ports:
       - '80:80'

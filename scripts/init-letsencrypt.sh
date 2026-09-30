@@ -1,12 +1,11 @@
 #!/bin/bash
-# One-time Let's Encrypt certificate bootstrap for either server's nginx.
-# Run this ONCE per server, after copying+filling in that server's real env
-# file — it starts the stack for you, so you don't also need a separate
+# One-time Let's Encrypt certificate bootstrap for the server's nginx.
+# Run this ONCE, after copying+filling in the server's real env file — it
+# starts the stack for you, so you don't also need a separate
 # `docker compose up`.
 #
 # Usage (run from the repo root on the target server):
-#   ./scripts/init-letsencrypt.sh web-api
-#   ./scripts/init-letsencrypt.sh worker
+#   ./scripts/init-letsencrypt.sh prod
 #
 # Why this exists: nginx refuses to start if a `ssl_certificate` file it's
 # configured to load doesn't exist yet — but on a brand new server, no
@@ -27,7 +26,7 @@
 # nginx reload that picks it up both happen automatically from here on.
 set -e
 
-ROLE="${1:?Usage: ./scripts/init-letsencrypt.sh <web-api|worker>}"
+ROLE="${1:?Usage: ./scripts/init-letsencrypt.sh <role, e.g. prod>}"
 COMPOSE_FILE="docker-compose.$ROLE.yml"
 ENV_FILE=".env.$ROLE"
 
