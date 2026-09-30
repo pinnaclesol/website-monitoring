@@ -1,21 +1,22 @@
 name: Deploy to production
 
-# Every push to main (direct push or merged PR) redeploys both servers —
-# this is a monorepo, so a change to a shared lib can affect either one.
-# Each job just SSHes in and runs scripts/redeploy.sh, the exact same
-# command a developer would run by hand (git pull + docker compose up
-# -d --build + image prune) — see that script for what it actually does.
+# Every push to main (direct push or merged PR) redeploys the single
+# combined server (api + web + worker consolidated — see
+# docker-compose.prod.yml's header comment). SSHes in and runs
+# scripts/redeploy.sh, the exact same command a developer would run by
+# hand (git pull + docker compose up -d --build + image prune) — see
+# that script for what it actually does.
 on:
   push:
     branches: [main]
 
 jobs:
-  deploy-app:
-    name: Deploy app server (api + web)
+  deploy:
+    name: Deploy (api + web + worker)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
-      group: deploy-app
+      group: deploy
       cancel-in-progress: false
     steps:
       - name: Load deploy key
@@ -26,22 +27,4 @@ jobs:
       - name: SSH in and redeploy
         run: |
           ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.APP_SERVER_HOST }} \
-            'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.web-api.yml'
-
-  deploy-worker:
-    name: Deploy worker server
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    concurrency:
-      group: deploy-worker
-      cancel-in-progress: false
-    steps:
-      - name: Load deploy key
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
-
-      - name: SSH in and redeploy
-        run: |
-          ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.WORKER_SERVER_HOST }} \
-            'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.worker.yml'
+            'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.prod.yml'

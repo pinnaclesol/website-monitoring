@@ -1,0 +1,54 @@
+server {
+    listen 80 default_server;
+    server_name _;
+
+    client_max_body_size 10m;
+
+    # 127.0.0.11 is Docker's embedded DNS. `web`'s/`worker`'s containers are
+    # recreated (new IP) on every scripts/redeploy.sh run, but this nginx
+    # container itself isn't restarted then — a plain `proxy_pass
+    # http://web:4000` would resolve once at config-load and go stale after
+    # the first redeploy. A variable forces nginx to re-resolve per the
+    # `valid` window instead of caching forever.
+    resolver 127.0.0.11 valid=10s;
+
+    # Filenames are randomUUID-based (one per upload, never reused), so a
+    # long immutable cache is safe. See docker-compose.prod.yml's nginx
+    # volumes comment for why this bypasses `web` entirely.
+    location /uploads/ {
+        alias /uploads/;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Bull Board (already Basic-Auth-gated by BULL_BOARD_USER/PASS
+    # internally) and worker's own health check — both live on `worker`,
+    # not `web`. Everything else below falls through to `web`.
+    location /admin/queues {
+        set $upstream_worker http://worker:4002;
+        proxy_pass $upstream_worker;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /health {
+        set $upstream_worker http://worker:4002;
+        proxy_pass $upstream_worker;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        set $upstream_web http://web:4000;
+        proxy_pass $upstream_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
