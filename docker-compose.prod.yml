@@ -1,4 +1,3 @@
-# Single combined DigitalOcean VPS running `api` + `web` + `worker` + `signal-bridge`,
 # plus nginx as a reverse proxy — all services consolidated onto one server.
 # Postgres/Redis are externally managed (DigitalOcean Managed Databases).
 #
