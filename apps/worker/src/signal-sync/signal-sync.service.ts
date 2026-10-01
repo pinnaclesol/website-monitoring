@@ -72,12 +72,19 @@ export class SignalSyncService implements OnModuleInit, OnModuleDestroy {
     let removed = 0;
 
     try {
-      const accountsRes = await fetch(`${this.signalApiUrl}/v1/accounts`, {
-        signal: AbortSignal.timeout(30000),
-      });
+      let accountsRes: Response;
+      try {
+        accountsRes = await fetch(`${this.signalApiUrl}/v1/accounts`, {
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (fetchErr: any) {
+        this.logger.warn(`Signal bridge at ${this.signalApiUrl} is currently unreachable: ${fetchErr.message}`);
+        return { accountsSynced: 0, groupsSynced: 0, removed: 0 };
+      }
 
       if (!accountsRes.ok) {
-        throw new Error(`Failed to fetch accounts from Signal bridge (HTTP ${accountsRes.status})`);
+        this.logger.warn(`Failed to fetch accounts from Signal bridge (HTTP ${accountsRes.status})`);
+        return { accountsSynced: 0, groupsSynced: 0, removed: 0 };
       }
 
       const data = await accountsRes.json();

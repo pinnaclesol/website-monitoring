@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { UptimePrismaService } from '@uptime/uptime-db';
 import { createSignalSyncQueue, SignalSyncJobData } from '@uptime/queue';
 import { Queue } from 'bullmq';
@@ -51,12 +51,24 @@ export class SignalConfigService implements OnModuleDestroy {
 
     try {
       // 1. Fetch current accounts from Signal bridge
-      const accountsRes = await fetch(`${this.signalApiUrl}/v1/accounts`, {
-        signal: AbortSignal.timeout(30000),
-      });
+      let accountsRes: Response;
+      try {
+        accountsRes = await fetch(`${this.signalApiUrl}/v1/accounts`, {
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (fetchErr: any) {
+        this.logger.error(`Failed to reach Signal bridge at ${this.signalApiUrl}: ${fetchErr.message}`);
+        throw new BadGatewayException(
+          `Cannot reach Signal bridge at ${this.signalApiUrl}: ${fetchErr.message}. Ensure the signal-bridge container is running and healthy.`
+        );
+      }
 
       if (!accountsRes.ok) {
-        throw new Error(`Failed to fetch accounts from Signal bridge (HTTP ${accountsRes.status})`);
+        const errBody = await accountsRes.text().catch(() => '');
+        this.logger.error(`Signal bridge at ${this.signalApiUrl}/v1/accounts returned HTTP ${accountsRes.status}: ${errBody}`);
+        throw new BadGatewayException(
+          `Signal bridge returned HTTP ${accountsRes.status}: ${errBody || 'Unknown error'}`
+        );
       }
 
       const data = await accountsRes.json();
@@ -230,7 +242,7 @@ export class SignalConfigService implements OnModuleDestroy {
       this.logger.log(`Signal sync completed: ${accountsSynced} accounts, ${groupsSynced} groups.`);
       return { accountsSynced, groupsSynced, removed };
     } catch (error: any) {
-      this.logger.error(`Error during Signal sync: ${error.message}`);
+      this.logger.error(`Error during Signal sync: ${error.message}`, error.stack);
       throw error;
     }
   }
