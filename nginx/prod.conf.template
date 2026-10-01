@@ -12,6 +12,7 @@ server {
     # `valid` window instead of caching forever.
     resolver 127.0.0.11 valid=10s;
 
+    # Direct static file serving for branding images (logos, favicons).
     # Filenames are randomUUID-based (one per upload, never reused), so a
     # long immutable cache is safe. See docker-compose.prod.yml's nginx
     # volumes comment for why this bypasses `web` entirely.
@@ -20,9 +21,8 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
-    # Bull Board (already Basic-Auth-gated by BULL_BOARD_USER/PASS
-    # internally) and worker's own health check — both live on `worker`,
-    # not `web`. Everything else below falls through to `web`.
+    # Bull Board queue observability dashboard (Basic Auth handled by worker)
+    # Both Bull Board and worker's health endpoints live on `worker:4002`.
     location /admin/queues {
         set $upstream_worker http://worker:4002;
         proxy_pass $upstream_worker;
@@ -33,13 +33,28 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Worker health check endpoints
     location = /health {
         set $upstream_worker http://worker:4002;
         proxy_pass $upstream_worker;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location /worker-health {
+        set $upstream_worker http://worker:4002;
+        proxy_pass $upstream_worker/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Main Next.js web application
     location / {
         set $upstream_web http://web:4000;
         proxy_pass $upstream_web;

@@ -142,6 +142,21 @@ services:
       - /app/libs/uptime-db/src/generated
     init: true
 
+  signal-bridge:
+    image: bbernhard/signal-cli-rest-api:latest-dev
+    container_name: signal-bridge-dev
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: always
+    ports:
+      - '8080:8080'
+    volumes:
+      - ./signal-data:/home/.local/share/signal-cli
+    environment:
+      - MODE=json-rpc
+      - LOG_LEVEL=debug
+
 volumes:
   postgres_data:
   redis_data:

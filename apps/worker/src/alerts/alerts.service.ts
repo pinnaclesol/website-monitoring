@@ -61,7 +61,7 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
     const name = monitor.label || monitor.domain;
     const message = buildAlertMessage(name, event, occurredAt, downtimeMs);
 
-    const [telegramSentCount, , emailCount] = await Promise.all([
+    const [telegramSentCount, signalSentCount, emailCount] = await Promise.all([
       this.sendTelegramAlerts(message),
       this.sendSignalAlert(message),
       this.prisma.emailRecipient.count({ where: { isActive: true } }),
@@ -69,7 +69,7 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
 
     this.logger.log(
       `Dispatched "${event}" alert for ${name} — Telegram sent to ${telegramSentCount} destination(s), ` +
-        `Signal attempted, email (${emailCount} recipient(s)) still stubbed`
+        `Signal sent to ${signalSentCount} group(s), email (${emailCount} recipient(s)) still stubbed`
     );
   }
 
@@ -111,39 +111,57 @@ export class AlertsService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Reads SignalConfig fresh from the DB every call (never cached) and
-   * POSTs to the sidecar's `/v2/send`. Silently no-ops if Signal isn't
-   * configured/active — that's a normal state, not an error. Never logs the
-   * sender/recipient numbers or the upstream response body (which could
-   * itself echo the numbers back) — only counts/status codes, matching
-   * this app's secrets discipline for phone numbers.
+   * Reads Signal groups configured with `receiveAlerts: true` (and active account)
+   * fresh from the DB every call (never cached) and POSTs to the sidecar's `/v2/send`.
+   * Only user-selected groups receive alerts. Returns how many sends succeeded.
    */
-  private async sendSignalAlert(message: string): Promise<void> {
-    const config = await this.prisma.signalConfig.findFirst({ where: { isActive: true } });
-    if (!config) return;
+  private async sendSignalAlert(message: string): Promise<number> {
+    const activeGroups = await (this.prisma as any).signalGroup.findMany({
+      where: {
+        receiveAlerts: true,
+        isActive: true,
+        account: { isActive: true },
+      },
+      include: {
+        account: true,
+      },
+    });
+
+    if (!activeGroups || activeGroups.length === 0) return 0;
 
     const apiUrl = process.env.SIGNAL_REST_API_URL;
     if (!apiUrl) {
-      this.logger.warn('SignalConfig is active but SIGNAL_REST_API_URL is not set — skipping Signal alert');
-      return;
+      this.logger.warn('Signal groups are configured to receive alerts but SIGNAL_REST_API_URL is not set — skipping Signal alert');
+      return 0;
     }
 
-    try {
-      const res = await fetch(`${apiUrl.replace(/\/+$/, '')}/v2/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          number: config.senderNumber,
-          recipients: [config.recipientNumber],
-        }),
-      });
-      if (!res.ok) {
-        this.logger.error(`Signal send failed (HTTP ${res.status})`);
-      }
-    } catch (err) {
-      this.logger.error(`Signal send error: ${err instanceof Error ? err.message : 'unknown error'}`);
-    }
+    const results = await Promise.all(
+      activeGroups.map(async (group: any) => {
+        try {
+          const res = await fetch(`${apiUrl.replace(/\/+$/, '')}/v2/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              message,
+              number: group.account.phoneNumber,
+              recipients: [group.groupId],
+            }),
+          });
+          if (!res.ok) {
+            this.logger.error(`Signal send failed for group "${group.name || group.groupId}" (HTTP ${res.status})`);
+            return false;
+          }
+          return true;
+        } catch (err) {
+          this.logger.error(
+            `Signal send error for group "${group.name || group.groupId}": ${err instanceof Error ? err.message : 'unknown error'}`
+          );
+          return false;
+        }
+      })
+    );
+
+    return results.filter(Boolean).length;
   }
 }
 

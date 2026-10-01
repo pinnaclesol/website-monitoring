@@ -6,7 +6,12 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { createBullBoard } from '@bull-board/api';
 import { BullMQAdapter } from '@bull-board/api/bullMQAdapter';
 import { ExpressAdapter } from '@bull-board/express';
-import { createAlertDispatchQueue, createCleanupQueue, createMonitorChecksQueue } from '@uptime/queue';
+import {
+  createAlertDispatchQueue,
+  createCleanupQueue,
+  createMonitorChecksQueue,
+  createSignalSyncQueue,
+} from '@uptime/queue';
 import { AppModule } from './app.module';
 
 const BULL_BOARD_PATH = '/admin/queues';
@@ -80,6 +85,7 @@ async function bootstrap(): Promise<void> {
       new BullMQAdapter(createMonitorChecksQueue()),
       new BullMQAdapter(createAlertDispatchQueue()),
       new BullMQAdapter(createCleanupQueue()),
+      new BullMQAdapter(createSignalSyncQueue()),
     ],
     serverAdapter,
   });

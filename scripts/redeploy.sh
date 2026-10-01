@@ -1,6 +1,8 @@
 #!/bin/bash
-# Pulls the latest code and rebuilds/restarts one server's containers.
+# Pulls the latest code and rebuilds/restarts the single-server production stack.
 # Run from the repo root:
+#   ./scripts/redeploy.sh
+# Or specify a custom compose file:
 #   ./scripts/redeploy.sh docker-compose.prod.yml
 #
 # Also what .github/workflows/deploy.yml runs automatically over SSH on
@@ -13,7 +15,7 @@
 # Dockerfile.api), so pending migrations apply automatically here too.
 set -e
 
-COMPOSE_FILE="${1:?Usage: ./scripts/redeploy.sh <compose-file, e.g. docker-compose.prod.yml>}"
+COMPOSE_FILE="${1:-docker-compose.prod.yml}"
 
 echo "[INFO] Pulling latest code..."
 git pull

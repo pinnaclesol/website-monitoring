@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { hasPermission } from '@uptime/auth';
 import {
@@ -18,10 +18,18 @@ import {
   TabsList,
   TabsTrigger,
   TabsContent,
+  Modal,
   useToast,
 } from '@uptime/ui';
 import { apiFetch } from '../../../lib/api-client';
-import type { TelegramAccount, SignalConfig, EmailRecipient, SmtpConfig, AlertSettings } from '../../../lib/types';
+import type { TelegramAccount, SignalAccount, EmailRecipient, SmtpConfig, AlertSettings } from '../../../lib/types';
+import {
+  getSignalQRCodeUrl,
+  getSignalAccounts,
+  syncSignalAccounts,
+  toggleGroupAlerts,
+  deleteSignalAccount,
+} from '../../../lib/signal-client';
 import { useSiteName } from '../site-name-context';
 import { PermissionGate } from '../permission-gate';
 
@@ -48,16 +56,20 @@ export default function NotificationsPage() {
   const { data: session } = useSession();
   const canUpdate = !!session?.user.permissions && hasPermission(session.user.permissions, 'notifications:update');
 
+  const [activeTab, setActiveTab] = useState('telegram');
   const [telegramAccounts, setTelegramAccounts] = useState<TelegramAccount[] | null>(null);
   const [newTgLabel, setNewTgLabel] = useState('');
   const [newTgToken, setNewTgToken] = useState('');
   const [newTgChat, setNewTgChat] = useState('');
   const [addingTg, setAddingTg] = useState(false);
 
-  const [signal, setSignal] = useState<SignalConfig | null>(null);
-  const [signalSender, setSignalSender] = useState('');
-  const [signalRecipient, setSignalRecipient] = useState('');
-  const [savingSignal, setSavingSignal] = useState(false);
+  const [signalAccounts, setSignalAccounts] = useState<SignalAccount[] | null>(null);
+  const [isQRModalOpen, setIsQRModalOpen] = useState(false);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [isSyncingSignal, setIsSyncingSignal] = useState(false);
+  const [unlinkingPhone, setUnlinkingPhone] = useState<string | null>(null);
+  const [togglingGroupId, setTogglingGroupId] = useState<string | null>(null);
+  const initialPhonesRef = useRef<Set<string>>(new Set());
 
   const [emailRecipients, setEmailRecipients] = useState<EmailRecipient[] | null>(null);
   const [newEmail, setNewEmail] = useState('');
@@ -79,17 +91,13 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     async function load() {
-      const [tg, sig, ns] = await Promise.all([
+      const [tg, sigAccounts, ns] = await Promise.all([
         apiFetch<TelegramAccount[]>('settings/telegram-accounts'),
-        apiFetch<SignalConfig | null>('settings/signal-config'),
+        getSignalAccounts().catch(() => []),
         apiFetch<AlertSettings>('settings/alerts'),
       ]);
       setTelegramAccounts(tg);
-      setSignal(sig);
-      if (sig) {
-        setSignalSender(sig.senderNumber);
-        setSignalRecipient(sig.recipientNumber);
-      }
+      setSignalAccounts(Array.isArray(sigAccounts) ? sigAccounts : []);
       setSettings(ns);
       setRepeatInterval(ns.repeatIntervalSeconds ?? 300);
       setRecoveryAlert(ns.recoveryAlertEnabled);
@@ -147,23 +155,181 @@ export default function NotificationsPage() {
     }
   }
 
-  async function saveSignal() {
-    if (!signalSender.trim() || !signalRecipient.trim()) {
-      toast({ type: 'error', title: 'Both numbers required' });
-      return;
-    }
-    setSavingSignal(true);
+  async function loadSignalAccounts() {
     try {
-      const updated = await apiFetch<SignalConfig>('settings/signal-config', {
-        method: 'PUT',
-        body: JSON.stringify({ senderNumber: signalSender.trim(), recipientNumber: signalRecipient.trim() }),
-      });
-      setSignal(updated);
-      toast({ type: 'success', title: 'Signal settings saved' });
+      const accounts = await getSignalAccounts();
+      setSignalAccounts(Array.isArray(accounts) ? accounts : []);
     } catch (err) {
-      toast({ type: 'error', title: 'Could not save Signal settings', message: err instanceof Error ? err.message : undefined });
+      toast({
+        type: 'error',
+        title: 'Could not load Signal accounts',
+        message: err instanceof Error ? err.message : undefined,
+      });
+    }
+  }
+
+  async function handleSyncSignal() {
+    setIsSyncingSignal(true);
+    try {
+      const res = await syncSignalAccounts();
+      await loadSignalAccounts();
+      toast({
+        type: 'success',
+        title: 'Signal sync completed',
+        message: `Synced ${res.accountsSynced} account(s) and ${res.groupsSynced} group(s).`,
+      });
+    } catch (err) {
+      toast({
+        type: 'error',
+        title: 'Failed to sync with Signal bridge',
+        message: err instanceof Error ? err.message : undefined,
+      });
     } finally {
-      setSavingSignal(false);
+      setIsSyncingSignal(false);
+    }
+  }
+
+  function openSignalQR() {
+    initialPhonesRef.current = new Set((signalAccounts || []).map((a) => a.phoneNumber));
+    const url = getSignalQRCodeUrl();
+    setQrCodeUrl(url);
+    setIsQRModalOpen(true);
+  }
+
+  // Auto-detect linked device while QR modal is open
+  useEffect(() => {
+    if (!isQRModalOpen) return;
+
+    let isPolling = false;
+    const initialPhones = initialPhonesRef.current;
+
+    const pollInterval = setInterval(async () => {
+      if (isPolling) return;
+      isPolling = true;
+      try {
+        const syncRes = await syncSignalAccounts();
+        const accounts = await getSignalAccounts();
+        const accList = Array.isArray(accounts) ? accounts : [];
+
+        const hasNewAccount = accList.some((acc) => !initialPhones.has(acc.phoneNumber));
+        if (hasNewAccount || (initialPhones.size === 0 && accList.length > 0)) {
+          setSignalAccounts(accList);
+          setIsQRModalOpen(false);
+          setQrCodeUrl(null);
+          toast({
+            type: 'success',
+            title: 'Signal account connected!',
+            message: `Discovered ${syncRes.accountsSynced} account(s) and ${syncRes.groupsSynced} group(s).`,
+          });
+        }
+      } catch {
+        // Silently continue polling until scan completes or user closes modal
+      } finally {
+        isPolling = false;
+      }
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [isQRModalOpen, toast]);
+
+  // Keep Signal tab auto-synced (discovers new groups and auto-removes unlinked accounts)
+  useEffect(() => {
+    if (activeTab !== 'signal' || isQRModalOpen) return;
+
+    // Trigger sync immediately upon entering the Signal tab
+    syncSignalAccounts()
+      .then(async () => {
+        const accounts = await getSignalAccounts();
+        setSignalAccounts(Array.isArray(accounts) ? accounts : []);
+      })
+      .catch(() => {
+        loadSignalAccounts();
+      });
+
+    // Auto-sync every 10 seconds while on the Signal tab
+    const interval = setInterval(async () => {
+      try {
+        await syncSignalAccounts();
+        const accounts = await getSignalAccounts();
+        setSignalAccounts(Array.isArray(accounts) ? accounts : []);
+      } catch {
+        // Silently catch background poll errors
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [activeTab, isQRModalOpen]);
+
+  async function handleCloseQRModal() {
+    setIsQRModalOpen(false);
+    setQrCodeUrl(null);
+    setIsSyncingSignal(true);
+    try {
+      const res = await syncSignalAccounts();
+      const accounts = await getSignalAccounts();
+      setSignalAccounts(Array.isArray(accounts) ? accounts : []);
+      if (res.accountsSynced > 0) {
+        toast({
+          type: 'success',
+          title: 'Signal sync completed',
+          message: `Synced ${res.accountsSynced} account(s) and ${res.groupsSynced} group(s).`,
+        });
+      }
+    } catch (err) {
+      toast({
+        type: 'error',
+        title: 'Could not sync Signal account',
+        message: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setIsSyncingSignal(false);
+    }
+  }
+
+  async function handleToggleGroup(groupId: string, groupName: string | null, currentReceiveAlerts: boolean) {
+    const nextVal = !currentReceiveAlerts;
+    setTogglingGroupId(groupId);
+    try {
+      await toggleGroupAlerts(groupId, nextVal);
+      setSignalAccounts((prev) =>
+        prev
+          ? prev.map((acc) => ({
+              ...acc,
+              groups: acc.groups.map((g) => (g.id === groupId ? { ...g, receiveAlerts: nextVal } : g)),
+            }))
+          : []
+      );
+      toast({
+        type: 'success',
+        title: nextVal ? 'Alerts enabled' : 'Alerts disabled',
+        message: `${groupName || 'Group'} will ${nextVal ? 'now receive' : 'no longer receive'} alerts.`,
+      });
+    } catch (err) {
+      toast({
+        type: 'error',
+        title: 'Failed to update group alert settings',
+        message: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setTogglingGroupId(null);
+    }
+  }
+
+  async function handleUnlinkAccount(phoneNumber: string) {
+    if (!confirm(`Are you sure you want to unlink Signal account ${phoneNumber}?`)) return;
+    setUnlinkingPhone(phoneNumber);
+    try {
+      await deleteSignalAccount(phoneNumber);
+      setSignalAccounts((prev) => (prev ? prev.filter((a) => a.phoneNumber !== phoneNumber) : []));
+      toast({ type: 'info', title: 'Signal account unlinked', message: phoneNumber });
+    } catch (err) {
+      toast({
+        type: 'error',
+        title: 'Could not unlink account',
+        message: err instanceof Error ? err.message : undefined,
+      });
+    } finally {
+      setUnlinkingPhone(null);
     }
   }
 
@@ -245,7 +411,7 @@ export default function NotificationsPage() {
     }
   }
 
-  const loading = telegramAccounts === null || settings === null || (EMAIL_ENABLED && emailRecipients === null);
+  const loading = telegramAccounts === null || signalAccounts === null || settings === null || (EMAIL_ENABLED && emailRecipients === null);
 
   return (
     <PermissionGate permission="notifications:view">
@@ -253,7 +419,7 @@ export default function NotificationsPage() {
         <Breadcrumb section={breadcrumbSiteName} page="Notifications" />
       </Topbar>
       <div className="flex-1 p-6">
-        <Card className="max-w-[560px]">
+        <Card className="max-w-[700px]">
           <CardHeader>
             <CardTitle>Notifications</CardTitle>
             <CardDescription>Where alerts go when a monitor goes down</CardDescription>
@@ -263,7 +429,7 @@ export default function NotificationsPage() {
             <div className="px-6 pb-6 text-sm text-text-muted">Loading…</div>
           ) : (
             <div className="px-5 pb-5">
-              <Tabs defaultValue="telegram">
+              <Tabs value={activeTab} onValueChange={setActiveTab}>
                 <TabsList>
                   <TabsTrigger value="telegram">Telegram</TabsTrigger>
                   <TabsTrigger value="signal">Signal</TabsTrigger>
@@ -325,31 +491,117 @@ export default function NotificationsPage() {
                 </TabsContent>
 
                 <TabsContent value="signal">
-                  <div className="mb-3.5">
-                    <FieldLabel>Sender phone number</FieldLabel>
-                    <Input
-                      value={signalSender}
-                      onChange={(e) => setSignalSender(e.target.value)}
-                      placeholder="+15550000000"
-                      disabled={!canUpdate}
-                    />
-                    <Hint>The number registered with signal-cli-rest-api</Hint>
+                  <div className="mb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <SubHeading>Connected Signal Accounts</SubHeading>
+                      <p className="text-[13px] text-text-muted">
+                        Link Signal accounts and select which groups will receive uptime and downtime alerts.
+                      </p>
+                    </div>
+                    {canUpdate ? (
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleSyncSignal}
+                          disabled={isSyncingSignal}
+                        >
+                          {isSyncingSignal ? 'Syncing…' : 'Sync Groups'}
+                        </Button>
+                        <Button size="sm" onClick={openSignalQR} disabled={isSyncingSignal}>
+                          + Link Signal Account
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="mb-3.5">
-                    <FieldLabel>Recipient number</FieldLabel>
-                    <Input
-                      value={signalRecipient}
-                      onChange={(e) => setSignalRecipient(e.target.value)}
-                      placeholder="+15551111111"
-                      disabled={!canUpdate}
-                    />
-                    <Hint>Who receives the alert messages</Hint>
+
+                  {signalAccounts === null ? (
+                    <div className="py-6 text-center text-[13px] text-text-muted">Loading Signal accounts…</div>
+                  ) : signalAccounts.length === 0 ? (
+                    <div className="rounded border border-dashed border-border p-8 text-center bg-bg-secondary/40">
+                      <div className="mb-2 text-sm font-medium text-text">No Signal accounts linked yet</div>
+                      <p className="mb-4 text-xs text-text-muted max-w-sm mx-auto">
+                        Link a Signal account by scanning a QR code with your phone. Once connected, your Signal groups will appear here and you can enable alerts for selected groups.
+                      </p>
+                      {canUpdate ? (
+                        <Button size="sm" onClick={openSignalQR}>
+                          Link Signal Account
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {signalAccounts.map((account) => (
+                        <div
+                          key={account.id}
+                          className="rounded border border-border bg-bg-secondary p-4 space-y-3"
+                        >
+                          <div className="flex items-center justify-between pb-3 border-b border-border">
+                            <div className="flex items-center gap-2.5">
+                              <span className="font-mono text-sm font-semibold text-text">{account.phoneNumber}</span>
+                              <Badge status="up" label="Connected" />
+                            </div>
+                            {canUpdate ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-red-500 hover:text-red-600 hover:bg-red-500/10"
+                                onClick={() => handleUnlinkAccount(account.phoneNumber)}
+                                disabled={unlinkingPhone === account.phoneNumber}
+                              >
+                                {unlinkingPhone === account.phoneNumber ? 'Unlinking…' : 'Unlink'}
+                              </Button>
+                            ) : null}
+                          </div>
+
+                          <div>
+                            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-text-subtle">
+                              Groups ({account.groups.length})
+                            </div>
+                            {account.groups.length === 0 ? (
+                              <div className="py-2 text-xs text-text-muted italic">
+                                No groups found for this account. Create or join a Signal group, then click &quot;Sync Groups&quot;.
+                              </div>
+                            ) : (
+                              <div className="divide-y divide-border/60 rounded border border-border bg-bg">
+                                {account.groups.map((group) => (
+                                  <div
+                                    key={group.id}
+                                    className="flex items-center justify-between px-3 py-2.5 hover:bg-bg-secondary/40 transition-colors"
+                                  >
+                                    <div className="min-w-0 pr-4">
+                                      <div className="text-[13px] font-medium text-text truncate">
+                                        {group.name || 'Unnamed Group'}
+                                      </div>
+                                      <div className="font-mono text-[10px] text-text-subtle truncate">
+                                        {group.groupId}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2.5 shrink-0">
+                                      <span className="text-xs text-text-muted">
+                                        {group.receiveAlerts ? 'Alerts ON' : 'Alerts OFF'}
+                                      </span>
+                                      <Toggle
+                                        checked={group.receiveAlerts}
+                                        onCheckedChange={() =>
+                                          handleToggleGroup(group.id, group.name, group.receiveAlerts)
+                                        }
+                                        disabled={!canUpdate || togglingGroupId === group.id}
+                                      />
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="mt-4 rounded border border-border/60 bg-bg-secondary/30 p-3 text-xs text-text-muted leading-relaxed">
+                    <strong>Note:</strong> Alerts are only dispatched to groups where &quot;Alerts ON&quot; is toggled. Signal groups without active toggle will never receive alert messages.
                   </div>
-                  {canUpdate ? (
-                    <Button size="sm" onClick={saveSignal} disabled={savingSignal}>
-                      {savingSignal ? 'Saving…' : signal ? 'Update Signal settings' : 'Save Signal settings'}
-                    </Button>
-                  ) : null}
                 </TabsContent>
 
                 {/* Radix's TabsContent mounts its children regardless of which tab is active (only toggles visibility), so this must be skipped
@@ -504,6 +756,42 @@ export default function NotificationsPage() {
             </div>
           )}
         </Card>
+
+        {/* Signal QR Linking Modal */}
+        <Modal
+          open={isQRModalOpen}
+          onClose={handleCloseQRModal}
+          title="Link Signal Account"
+          description="Link your Signal account by scanning this QR code in the Signal mobile app."
+          footer={
+            <Button size="sm" onClick={handleCloseQRModal} className="w-full">
+              Done / Close
+            </Button>
+          }
+        >
+          <div className="flex flex-col items-center justify-center p-4">
+            <div className="p-3 bg-white rounded-lg border border-border shadow-sm mb-3">
+              {qrCodeUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={qrCodeUrl}
+                  alt="Signal Linking QR Code"
+                  className="w-60 h-60 object-contain"
+                />
+              ) : (
+                <div className="w-60 h-60 flex items-center justify-center text-text-muted">
+                  Loading QR code…
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-text-muted text-center max-w-xs leading-relaxed">
+              In Signal on your phone, go to <strong>Settings &gt; Linked Devices &gt; Link New Device</strong>, then scan the QR code above.
+            </p>
+            <p className="text-[11px] text-text-subtle text-center mt-1.5">
+              The QR code expires quickly. Close this dialog after scanning.
+            </p>
+          </div>
+        </Modal>
       </div>
     </PermissionGate>
   );

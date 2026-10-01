@@ -1,18 +1,16 @@
 name: Deploy to production
 
 # Every push to main (direct push or merged PR) redeploys the single
-# combined server (api + web + worker consolidated — see
-# docker-compose.prod.yml's header comment). SSHes in and runs
+# combined server (api + web + worker + signal-bridge). SSHes in and runs
 # scripts/redeploy.sh, the exact same command a developer would run by
-# hand (git pull + docker compose up -d --build + image prune) — see
-# that script for what it actually does.
+# hand (git pull + docker compose up -d --build + image prune).
 on:
   push:
     branches: [main]
 
 jobs:
   deploy:
-    name: Deploy (api + web + worker)
+    name: Deploy production server (api + web + worker)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -26,5 +24,5 @@ jobs:
 
       - name: SSH in and redeploy
         run: |
-          ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.APP_SERVER_HOST }} \
+          ssh -o StrictHostKeyChecking=accept-new root@${{ secrets.SERVER_HOST || secrets.APP_SERVER_HOST }} \
             'cd /var/www/website-monitoring && bash ./scripts/redeploy.sh docker-compose.prod.yml'

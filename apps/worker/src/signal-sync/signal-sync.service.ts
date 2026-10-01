@@ -1,56 +1,77 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Job, Queue, Worker } from 'bullmq';
+import {
+  createSignalSyncQueue,
+  createWorker,
+  QUEUE_NAMES,
+  SignalSyncJobData,
+} from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
-import { createSignalSyncQueue, SignalSyncJobData } from '@uptime/queue';
-import { Queue } from 'bullmq';
+
+const SIGNAL_SYNC_JOB_ID = 'signal-sync-recurring';
+/** Repeat every 5 minutes, matching ecom-dashboard */
+const SIGNAL_SYNC_CRON = '*/5 * * * *';
 
 @Injectable()
-export class SignalConfigService implements OnModuleDestroy {
-  private readonly logger = new Logger(SignalConfigService.name);
-  private queue: Queue<SignalSyncJobData> = createSignalSyncQueue();
+export class SignalSyncService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(SignalSyncService.name);
+  private queue?: Queue<SignalSyncJobData>;
+  private worker?: Worker<SignalSyncJobData>;
 
   constructor(private readonly prisma: UptimePrismaService) {}
-
-  async onModuleDestroy(): Promise<void> {
-    await this.queue.close();
-  }
 
   private get signalApiUrl(): string {
     return (process.env.SIGNAL_REST_API_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '');
   }
 
-  private get signalDeviceName(): string {
-    return process.env.SIGNAL_DEVICE_NAME || 'UptimeMonitor';
-  }
+  async onModuleInit(): Promise<void> {
+    this.queue = createSignalSyncQueue();
 
-  /**
-   * Retrieves all linked Signal accounts and their groups from the database.
-   */
-  async getAccounts() {
-    return (this.prisma as any).signalAccount.findMany({
-      where: { isActive: true },
-      include: {
-        groups: {
-          where: { isActive: true },
-          orderBy: { name: 'asc' },
-        },
-      },
-      orderBy: { createdAt: 'asc' },
+    // Schedule repeatable background job every 5 minutes in BullMQ (matches ecom-dashboard)
+    await this.queue.upsertJobScheduler(
+      SIGNAL_SYNC_JOB_ID,
+      { pattern: SIGNAL_SYNC_CRON },
+      { name: 'sync-signal-accounts', data: { manual: false } }
+    );
+    this.logger.log(`Scheduled repeatable BullMQ job ${SIGNAL_SYNC_JOB_ID} (${SIGNAL_SYNC_CRON})`);
+
+    // Worker processor
+    this.worker = createWorker<SignalSyncJobData>(
+      QUEUE_NAMES.SIGNAL_SYNC,
+      (job) => this.processJob(job),
+      { concurrency: 1 }
+    );
+
+    this.worker.on('error', (err) => {
+      this.logger.error(`signal-sync worker error: ${err.message}`);
     });
   }
 
+  async onModuleDestroy(): Promise<void> {
+    await this.worker?.close();
+    await this.queue?.close();
+  }
+
+  private async processJob(job: Job<SignalSyncJobData>): Promise<any> {
+    this.logger.log(`Processing BullMQ Signal sync job ${job.id} (${job.name})...`);
+    await job.updateProgress(10);
+
+    const result = await this.syncAccountsAndGroups();
+    await job.updateProgress(100);
+
+    this.logger.log(`Signal sync job ${job.id} completed: ${JSON.stringify(result)}`);
+    return result;
+  }
+
   /**
-   * Syncs linked accounts and groups directly from the Signal bridge sidecar.
-   * Mirrors ecom-dashboard's SignalSyncService logic.
+   * Syncs connected Signal accounts and groups from signal-bridge into PostgreSQL.
    */
   async syncAccountsAndGroups(): Promise<{ accountsSynced: number; groupsSynced: number; removed: number }> {
-    this.logger.log('Starting Signal accounts and groups sync...');
-
     let accountsSynced = 0;
     let groupsSynced = 0;
     let removed = 0;
 
     try {
-      // 1. Fetch current accounts from Signal bridge
       const accountsRes = await fetch(`${this.signalApiUrl}/v1/accounts`, {
         signal: AbortSignal.timeout(30000),
       });
@@ -81,7 +102,7 @@ export class SignalConfigService implements OnModuleDestroy {
       const seenAccountIds: string[] = [];
       const seenGroupIds: string[] = [];
       const validActiveAccounts: string[] = [];
-      const deviceName = this.signalDeviceName;
+      const deviceName = process.env.SIGNAL_DEVICE_NAME || 'UptimeMonitor';
 
       for (const phoneNumber of connectedAccounts) {
         this.logger.log(`Processing sync for account: ${phoneNumber}`);
@@ -146,7 +167,7 @@ export class SignalConfigService implements OnModuleDestroy {
 
         validActiveAccounts.push(phoneNumber);
 
-        // Upsert account in DB
+        // Upsert account
         const account = await (this.prisma as any).signalAccount.upsert({
           where: { phoneNumber },
           update: { isActive: true },
@@ -156,7 +177,7 @@ export class SignalConfigService implements OnModuleDestroy {
         seenAccountIds.push(account.id);
         accountsSynced++;
 
-        // Fetch groups for this account
+        // Fetch groups
         try {
           const encodedPhone = encodeURIComponent(phoneNumber);
           const groupsRes = await fetch(`${this.signalApiUrl}/v1/groups/${encodedPhone}`, {
@@ -193,15 +214,13 @@ export class SignalConfigService implements OnModuleDestroy {
               seenGroupIds.push(group.id);
               groupsSynced++;
             }
-          } else {
-            this.logger.warn(`Could not fetch groups for ${phoneNumber} (HTTP ${groupsRes.status})`);
           }
         } catch (groupError: any) {
-          this.logger.error(`Failed to fetch groups for account ${phoneNumber}: ${groupError.message}`);
+          this.logger.error(`Failed to fetch groups for ${phoneNumber}: ${groupError.message}`);
         }
       }
 
-      // Cleanup: mark un-seen groups as inactive
+      // Cleanup inactive groups
       if (seenAccountIds.length > 0) {
         await (this.prisma as any).signalGroup.updateMany({
           where: {
@@ -212,7 +231,7 @@ export class SignalConfigService implements OnModuleDestroy {
         });
       }
 
-      // Cleanup missing/unlinked accounts from DB
+      // Cleanup missing / unlinked accounts from DB
       const accountsToRemove = await (this.prisma as any).signalAccount.findMany({
         where: { phoneNumber: { notIn: validActiveAccounts } },
       });
@@ -227,70 +246,10 @@ export class SignalConfigService implements OnModuleDestroy {
         this.logger.log(`Deleted ${removed} accounts that were unlinked from Signal.`);
       }
 
-      this.logger.log(`Signal sync completed: ${accountsSynced} accounts, ${groupsSynced} groups.`);
       return { accountsSynced, groupsSynced, removed };
-    } catch (error: any) {
-      this.logger.error(`Error during Signal sync: ${error.message}`);
-      throw error;
+    } catch (err: any) {
+      this.logger.error(`Error during BullMQ Signal sync: ${err.message}`);
+      throw err;
     }
-  }
-
-  /**
-   * Toggles whether a specific Signal group receives uptime/downtime alerts.
-   */
-  async toggleGroupAlerts(groupId: string, receiveAlerts: boolean) {
-    return (this.prisma as any).signalGroup.update({
-      where: { id: groupId },
-      data: { receiveAlerts },
-    });
-  }
-
-  /**
-   * Unlinks device from Signal bridge and deletes account from DB.
-   */
-  async deleteAccount(phoneNumber: string) {
-    // 1. Unlink device (best effort)
-    try {
-      const devicesRes = await fetch(`${this.signalApiUrl}/v1/devices/${encodeURIComponent(phoneNumber)}`, {
-        signal: AbortSignal.timeout(10000),
-      });
-
-      if (devicesRes.ok) {
-        const devices = await devicesRes.json();
-        const ourDevice =
-          devices.find((d: any) => d.name?.toLowerCase() === this.signalDeviceName.toLowerCase()) ||
-          devices.find((d: any) => d.id > 1);
-
-        if (ourDevice) {
-          await fetch(
-            `${this.signalApiUrl}/v1/devices/${encodeURIComponent(phoneNumber)}/${ourDevice.id}`,
-            {
-              method: 'DELETE',
-              signal: AbortSignal.timeout(10000),
-            }
-          );
-          this.logger.log(`Unlinked device ${ourDevice.id} for ${phoneNumber}`);
-        }
-      }
-    } catch (e: any) {
-      this.logger.warn(`Device unlinking failed or already unlinked: ${e.message}`);
-    }
-
-    // 2. Remove account from bridge
-    try {
-      await fetch(`${this.signalApiUrl}/v1/accounts/${encodeURIComponent(phoneNumber)}`, {
-        method: 'DELETE',
-        signal: AbortSignal.timeout(10000),
-      });
-    } catch (e: any) {
-      this.logger.warn(`Account removal from bridge failed: ${e.message}`);
-    }
-
-    // 3. Delete from database
-    await (this.prisma as any).signalAccount.deleteMany({
-      where: { phoneNumber },
-    });
-
-    return { success: true };
   }
 }

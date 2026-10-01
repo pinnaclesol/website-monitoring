@@ -1,35 +1,14 @@
-# Single combined DigitalOcean VPS running `api` + `web` + `worker`, plus
-# nginx as a reverse proxy — all three apps consolidated onto one server
-# (deliberate cost/simplicity tradeoff; the old two-server split lived in
-# docker-compose.web-api.yml/docker-compose.worker.yml, still in git
-# history). Postgres/Redis are externally managed (DigitalOcean Managed
-# Databases) — nothing here provisions a database.
+# plus nginx as a reverse proxy — all services consolidated onto one server.
+# Postgres/Redis are externally managed (DigitalOcean Managed Databases).
 #
-# Note the tradeoff this gives up (see CLAUDE.md's Architecture section):
-# `worker` now shares this box's CPU/RAM with the login/dashboard `api`,
-# so a heavy check burst can compete with dashboard responsiveness —
-# acceptable for current scale, revisit (split `worker` back onto its own
-# VPS) if check volume grows enough to matter.
+# Plain HTTP for now — no TLS/Let's Encrypt here (see nginx/prod.conf.template).
 #
-# Plain HTTP for now, deliberately — no TLS/Let's Encrypt here (see
-# nginx/prod.conf.template). Re-add scripts/init-letsencrypt.sh's certbot
-# service + port 443 later once this needs to be HTTPS (also switch
-# NEXTAUTH_URL in .env.prod back to https:// at that point).
-#
-# Env: copy .env.prod.example -> .env.prod and fill in real values. Never
-# committed — see .gitignore.
+# Env: copy .env.prod.example -> .env.prod (or .env.production) and fill in real values.
 #
 # `api` publishes NO host port — only reachable by other containers on this
-# compose network (`web`'s server-side proxy talks to it at
-# http://api:4001). nginx is the only container with a host port, and it
-# only forwards to `web:4000` (default) or `worker:4002` (/admin/queues,
-# /health) — this is what keeps apps/api genuinely unreachable from the
-# internet, not just "not linked to" by convention.
-#
-# Uncomment the signal-cli-rest-api service below only if you want it
-# co-located on this server rather than already running elsewhere — if
-# you uncomment it, also set SIGNAL_REST_API_URL=http://signal-cli-rest-api:8080
-# in .env.prod.
+# compose network (`web`'s server-side proxy talks to it at http://api:4001).
+# nginx is the only container with a host port (80), and it forwards to
+# `web:4000` (default) or `worker:4002` (/admin/queues, /worker-health, /health).
 
 services:
   api:
@@ -38,7 +17,14 @@ services:
       dockerfile: Dockerfile.api
       target: production
     env_file:
-      - .env.prod
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
+    environment:
+      SIGNAL_REST_API_URL: http://signal-bridge:8080
+    depends_on:
+      - signal-bridge
     expose:
       - '4001'
     init: true
@@ -50,18 +36,20 @@ services:
       dockerfile: Dockerfile.web
       target: production
     env_file:
-      - .env.prod
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
     environment:
       API_URL: http://api:4001
+      SIGNAL_REST_API_URL: http://signal-bridge:8080
     depends_on:
       - api
     expose:
       - '4000'
     volumes:
       # Persists uploaded branding images (apps/web/app/api/upload/route.ts)
-      # across redeploys/`docker compose up --build` — that route writes to
-      # <cwd>/public/uploads, and Dockerfile.web's production stage runs
-      # `next start` from /app/apps/web, so that's exactly this path.
+      # across redeploys — writes to /app/apps/web/public/uploads.
       - uploads_data:/app/apps/web/public/uploads
     init: true
     restart: unless-stopped
@@ -72,23 +60,39 @@ services:
       dockerfile: Dockerfile.worker
       target: production
     env_file:
-      - .env.prod
+      - path: .env.prod
+        required: false
+      - path: .env.production
+        required: false
+    environment:
+      SIGNAL_REST_API_URL: http://signal-bridge:8080
+    depends_on:
+      - api
+      - signal-bridge
     expose:
       - '4002'
     init: true
     restart: unless-stopped
-    # depends_on: [signal-cli-rest-api]   # uncomment together with the service below
+
+  signal-bridge:
+    image: bbernhard/signal-cli-rest-api:latest-dev
+    container_name: signal-bridge
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    restart: always
+    volumes:
+      - ./signal-data:/home/.local/share/signal-cli
+    environment:
+      - MODE=json-rpc
+      - LOG_LEVEL=debug
 
   nginx:
     image: nginx:1.27-alpine
     volumes:
       - ./nginx/prod.conf.template:/etc/nginx/templates/default.conf.template:ro
       # Served directly by nginx (see nginx/prod.conf.template's /uploads/
-      # location) instead of proxied to `web` — Next.js 16's Turbopack
-      # production server snapshots `public/`'s contents at boot and
-      # never rescans it, so a file written to this volume by
-      # apps/web/app/api/upload/route.ts *after* the container started
-      # 404s forever from Next itself, no matter how long you wait.
+      # location) instead of proxied to `web`.
       - uploads_data:/uploads:ro
     ports:
       - '80:80'
@@ -97,14 +101,5 @@ services:
       - worker
     restart: unless-stopped
 
-  # signal-cli-rest-api:
-  #   image: bbernhard/signal-cli-rest-api:latest
-  #   environment:
-  #     MODE: normal
-  #   volumes:
-  #     - signal_data:/home/.local/share/signal-cli
-  #   restart: unless-stopped
-
 volumes:
   uploads_data:
-  # signal_data:
