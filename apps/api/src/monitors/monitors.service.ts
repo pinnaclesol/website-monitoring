@@ -223,6 +223,29 @@ export class MonitorsService {
     ]);
     const slowThresholdMs = monitoringSettings?.slowThresholdMs ?? 2000;
 
+    // Per-location results behind each monitor's *latest* check only — the
+    // history bars don't need them, so don't pull 30x the rows.
+    const latestCheckIds: string[] = [];
+    const seenMonitors = new Set<string>();
+    for (const check of checks) {
+      if (!seenMonitors.has(check.monitorId)) {
+        seenMonitors.add(check.monitorId);
+        latestCheckIds.push(check.id);
+      }
+    }
+    const regionRows = latestCheckIds.length
+      ? await this.prisma.monitorCheckRegion.findMany({
+          where: { checkId: { in: latestCheckIds } },
+          orderBy: { region: 'asc' },
+        })
+      : [];
+    const regionsByCheck = new Map<string, typeof regionRows>();
+    for (const row of regionRows) {
+      const list = regionsByCheck.get(row.checkId) ?? [];
+      list.push(row);
+      regionsByCheck.set(row.checkId, list);
+    }
+
     const checksByMonitor = new Map<string, typeof checks>();
     for (const check of checks) {
       const list = checksByMonitor.get(check.monitorId) ?? [];
@@ -297,6 +320,14 @@ export class MonitorsService {
               // Derived at read time (no stored flag) so changing the
               // threshold in Settings applies to existing checks too.
               isSlow: latestCheck.isUp && (latestCheck.responseTimeMs ?? 0) > slowThresholdMs,
+              regions: (regionsByCheck.get(latestCheck.id) ?? []).map((r) => ({
+                region: r.region,
+                isUp: r.isUp,
+                inconclusive: r.inconclusive,
+                statusCode: r.statusCode,
+                responseTimeMs: r.responseTimeMs,
+                error: r.error,
+              })),
             }
           : null,
         history,

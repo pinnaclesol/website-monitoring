@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
 
 export class UpdateMonitoringSettingsDto {
   // 30s floor keeps check load sane; 3600s (1h) ceiling keeps "uptime
@@ -36,4 +36,12 @@ export class UpdateMonitoringSettingsDto {
   @Min(1)
   @Max(60)
   retryDelaySeconds?: number;
+
+  /** Countries each check runs from through the proxy (ISO alpha-2, e.g. "US"). Empty = check directly from the server. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @ArrayUnique()
+  @Matches(/^[A-Z]{2}$/, { each: true, message: 'each location must be a 2-letter country code like US' })
+  locations?: string[];
 }

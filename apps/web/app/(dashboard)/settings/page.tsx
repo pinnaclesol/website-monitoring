@@ -86,6 +86,20 @@ function applyBrowserTabBranding(siteTitle: string, faviconUrl: string | null) {
   }
 }
 
+/** Always checked first and never removable — mirrors apps/api's and apps/worker's own enforcement. */
+const PRIMARY_LOCATION = 'US';
+
+// Countries confirmed to exit correctly through the Smartproxy account.
+const COUNTRY_OPTIONS = [
+  { code: 'US', name: 'United States' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'IN', name: 'India' },
+  { code: 'SG', name: 'Singapore' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'AU', name: 'Australia' },
+];
+
 const CHECK_INTERVAL_MIN = 30;
 const CHECK_INTERVAL_MAX = 3600;
 
@@ -111,6 +125,7 @@ export default function SettingsPage() {
   const [slowThresholdMs, setSlowThresholdMs] = useState(2000);
   const [retryAttempts, setRetryAttempts] = useState(2);
   const [retryDelaySeconds, setRetryDelaySeconds] = useState(5);
+  const [locations, setLocations] = useState<string[]>([]);
   const [savingMonitoring, setSavingMonitoring] = useState(false);
 
   useEffect(() => {
@@ -132,6 +147,7 @@ export default function SettingsPage() {
         setSlowThresholdMs(settings.slowThresholdMs);
         setRetryAttempts(settings.retryAttempts);
         setRetryDelaySeconds(settings.retryDelaySeconds);
+        setLocations(settings.locations);
       })
       .catch((err) => toast({ type: 'error', title: 'Could not load monitoring settings', message: err.message }));
   }, []);
@@ -200,6 +216,7 @@ export default function SettingsPage() {
           slowThresholdMs,
           retryAttempts,
           retryDelaySeconds,
+          locations: [PRIMARY_LOCATION, ...locations.filter((c) => c !== PRIMARY_LOCATION)],
         }),
       });
       setMonitoringSettings(updated);
@@ -208,6 +225,7 @@ export default function SettingsPage() {
       setSlowThresholdMs(updated.slowThresholdMs);
       setRetryAttempts(updated.retryAttempts);
       setRetryDelaySeconds(updated.retryDelaySeconds);
+      setLocations(updated.locations);
       toast({
         type: 'success',
         title: 'Monitoring settings saved',
@@ -390,6 +408,39 @@ export default function SettingsPage() {
                         <div className={`mt-1 text-xs ${error ? 'text-red' : 'text-text-muted'}`}>{error ?? hint}</div>
                       </div>
                     ))}
+                  </div>
+                  <div className="mb-4">
+                    <FieldLabel>Check locations</FieldLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {COUNTRY_OPTIONS.map(({ code, name }) => {
+                        const isPrimary = code === PRIMARY_LOCATION;
+                        const selected = isPrimary || locations.includes(code);
+                        return (
+                          <button
+                            key={code}
+                            type="button"
+                            disabled={!canUpdate || isPrimary}
+                            aria-pressed={selected}
+                            title={isPrimary ? 'Always checked first — cannot be removed' : undefined}
+                            onClick={() =>
+                              setLocations((prev) => (selected ? prev.filter((c) => c !== code) : [...prev, code]))
+                            }
+                            className={`rounded border px-2.5 py-1 text-[13px] transition-colors disabled:opacity-60 ${
+                              selected
+                                ? 'border-accent bg-accent/10 font-medium text-accent'
+                                : 'border-border-strong bg-bg-muted text-text-muted hover:text-text'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-1 text-xs text-text-muted">
+                      {!monitoringSettings?.proxyEnabled
+                        ? 'Proxy is not configured on the worker — checks run from the server and these are ignored.'
+                        : 'Every check runs from the United States. Only if that fails are the other selected locations asked to confirm, and the site is marked down when most of them fail. Proxied requests add 1–3s, so keep the slow threshold above that.'}
+                    </div>
                   </div>
                   {canUpdate ? (
                     <Button onClick={saveMonitoring} disabled={savingMonitoring || !monitoringValid}>

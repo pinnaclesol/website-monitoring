@@ -95,6 +95,7 @@ export function MonitorRow({
   const urlShort = stripProtocol(monitor.domain);
   const rt = monitor.latestCheck?.responseTimeMs ?? null;
   const slow = isSlowMonitor(monitor);
+  const regions = monitor.latestCheck?.regions ?? [];
   // Only worth showing when the site really ended up somewhere other than the
   // address we monitor (a plain http→https or www hop to the same host isn't news).
   const finalUrl = monitor.latestCheck?.finalUrl ?? null;
@@ -176,6 +177,31 @@ export function MonitorRow({
           {urlShort}
           <ExternalLinkIcon />
         </a>
+        {regions.length > 0 ? (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {regions.map((r) => (
+              <span
+                key={r.region}
+                title={
+                  r.inconclusive
+                    ? `${r.region}: proxy unavailable — not counted`
+                    : `${r.region}: ${r.isUp ? 'up' : 'down'}${r.statusCode ? ` (HTTP ${r.statusCode})` : ''}${
+                        r.responseTimeMs != null ? ` · ${formatResponseTime(r.responseTimeMs)}` : ''
+                      }${r.error ? ` · ${r.error}` : ''}`
+                }
+                className={`rounded border px-1 font-mono text-[10px] font-medium ${
+                  r.inconclusive
+                    ? 'border-border bg-bg-muted text-text-subtle'
+                    : r.isUp
+                      ? 'border-green-border bg-green-bg text-green'
+                      : 'border-red-border bg-red-bg text-red'
+                }`}
+              >
+                {r.region}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {redirectedTo ? (
           <div
             className="max-w-[260px] truncate font-mono text-[11px] text-text-subtle"

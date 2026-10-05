@@ -164,10 +164,38 @@ model MonitorCheck {
   updatedAt      DateTime @updatedAt
 
   monitor Monitor @relation(fields: [monitorId], references: [id], onDelete: Cascade)
+  /// Per-location results behind this check's verdict. Empty when the check
+  /// ran directly from the server (proxy disabled, or no locations selected).
+  regions MonitorCheckRegion[]
 
   // Required for efficient "latest checks for a monitor" queries.
   @@index([monitorId, timestamp(sort: Desc)])
   @@map("MonitorCheck")
+}
+
+/// One location's result within a multi-location check. The parent
+/// `MonitorCheck.isUp` is the verdict computed from these (strict majority of
+/// conclusive locations must fail for the check to count as down).
+model MonitorCheckRegion {
+  id             String  @id @default(cuid())
+  checkId        String
+  /// ISO 3166-1 alpha-2 country code the request exited from (e.g. "US").
+  region         String
+  isUp           Boolean
+  /// True when the proxy itself failed (auth/tunnel) — says nothing about the
+  /// site, so this location is excluded from the vote.
+  inconclusive   Boolean @default(false)
+  statusCode     Int?
+  responseTimeMs Int?
+  error          String?
+  errorType      String?
+  finalUrl       String?
+  redirectCount  Int?
+
+  check MonitorCheck @relation(fields: [checkId], references: [id], onDelete: Cascade)
+
+  @@index([checkId])
+  @@map("MonitorCheckRegion")
 }
 
 /// Downtime log for a Monitor. `endedAt = null` means the incident is
@@ -302,6 +330,9 @@ model MonitoringSettings {
   /// Total attempts before a failure is confirmed (1 = no retry).
   retryAttempts        Int      @default(2)
   retryDelaySeconds    Int      @default(5)
+  /// Countries each check runs from through the proxy (ISO alpha-2). Ignored
+  /// — checks run directly from the server — unless SMARTPROXY_ENABLED=true.
+  locations            String[] @default(["US", "DE", "SG"])
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
