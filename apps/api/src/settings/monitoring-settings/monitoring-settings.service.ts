@@ -11,18 +11,30 @@ export class MonitoringSettingsService {
     private readonly monitorsService: MonitorsService,
   ) {}
 
+  /** Whether apps/worker has the proxy configured — it reads the same root .env, so the dashboard can say whether `locations` will actually be used. */
+  private proxyEnabled(): boolean {
+    const { SMARTPROXY_ENABLED, SMARTPROXY_HOST, SMARTPROXY_PORT, SMARTPROXY_USERNAME, SMARTPROXY_PASSWORD } = process.env;
+    return SMARTPROXY_ENABLED === 'true' && !!(SMARTPROXY_HOST && SMARTPROXY_PORT && SMARTPROXY_USERNAME && SMARTPROXY_PASSWORD);
+  }
+
   async getOrCreate() {
+    return { ...(await this.findOrCreateRow()), proxyEnabled: this.proxyEnabled() };
+  }
+
+  private async findOrCreateRow() {
     const existing = await this.prisma.monitoringSettings.findFirst({ orderBy: { createdAt: 'asc' } });
     if (existing) return existing;
-    // Default (checkIntervalSeconds: 60) comes from the Prisma schema.
+    // Defaults (interval, timeout, retries, locations) come from the Prisma schema.
     return this.prisma.monitoringSettings.create({ data: {} });
   }
 
   async update(dto: UpdateMonitoringSettingsDto) {
-    const current = await this.getOrCreate();
+    const current = await this.findOrCreateRow();
     const updated = await this.prisma.monitoringSettings.update({
       where: { id: current.id },
-      data: dto,
+      // US is the primary location apps/worker always checks first, so it can
+      // never be deselected; the rest only confirm a failure.
+      data: dto.locations ? { ...dto, locations: ['US', ...dto.locations.filter((l) => l !== 'US')] } : dto,
     });
 
     // Existing monitors' BullMQ schedules were registered with the old
@@ -39,6 +51,6 @@ export class MonitoringSettingsService {
       await this.monitorsService.rescheduleAllActive();
     }
 
-    return updated;
+    return { ...updated, proxyEnabled: this.proxyEnabled() };
   }
 }

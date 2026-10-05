@@ -20,6 +20,16 @@ export interface MonitorWithStatus {
     redirectCount: number | null;
     /** Up, but slower than the configured slow threshold (display only). */
     isSlow: boolean;
+    /** Per-country results behind this check's verdict; empty when it ran directly from the server. */
+    regions: Array<{
+      region: string;
+      isUp: boolean;
+      /** The proxy itself failed for this country — not counted toward the verdict. */
+      inconclusive: boolean;
+      statusCode: number | null;
+      responseTimeMs: number | null;
+      error: string | null;
+    }>;
   } | null;
   history: Array<'up' | 'down'>;
   uptime24h: number | null;
@@ -104,6 +114,10 @@ export interface MonitoringSettings {
   slowThresholdMs: number;
   retryAttempts: number;
   retryDelaySeconds: number;
+  /** ISO alpha-2 countries each check runs from through the proxy. */
+  locations: string[];
+  /** Whether the worker has the proxy configured; if false, `locations` is ignored and checks run from the server. */
+  proxyEnabled: boolean;
 }
 
 export interface TelegramAccount {

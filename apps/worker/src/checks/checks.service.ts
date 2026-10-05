@@ -8,35 +8,17 @@ import {
   AlertDispatchJobData,
 } from '@uptime/queue';
 import { UptimePrismaService } from '@uptime/uptime-db';
+import { runHttpCheck, type CheckResult } from './http-check';
+import { closeProxyAgents, getProxyAgent, isProxyEnabled } from './proxy';
 
 /** Fallbacks used only if the MonitoringSettings row can't be read. */
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_LOCATIONS = ['US', 'DE', 'SG'];
+/** Always checked first, every cycle; the other locations only confirm a failure. */
+const PRIMARY_LOCATION = 'US';
+/** Label for a direct request from this server (used only when the proxy fails for the primary). */
+const SERVER_LOCATION = 'SERVER';
 const SETTINGS_CACHE_MS = 30_000;
-
-/** Redirect hops followed before a chain is reported as broken. */
-const MAX_REDIRECTS = 10;
-
-/**
- * Look like a normal visitor — a bare Node `fetch` sends `user-agent: node`,
- * which many sites/CDNs answer with 403 (reported as a false "down").
- */
-const BROWSER_HEADERS = {
-  'user-agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-  'accept-language': 'en-US,en;q=0.9',
-};
-
-type CheckErrorType =
-  | 'dns'
-  | 'timeout'
-  | 'tls'
-  | 'connection_refused'
-  | 'connection_reset'
-  | 'redirect_loop'
-  | 'too_many_redirects'
-  | 'http_status'
-  | 'unknown';
 
 /**
  * How many monitor checks this Worker processes concurrently. This is an
@@ -48,52 +30,18 @@ type CheckErrorType =
  */
 const MONITOR_CHECKS_CONCURRENCY = 50;
 
-interface CheckResult {
+interface RegionResult {
+  region: string;
+  result: CheckResult;
+  /** The proxy itself failed — excluded from the vote. */
+  inconclusive: boolean;
+}
+
+/** What one check cycle decided: the verdict, the result to show for it, and each location's own result. */
+interface CheckOutcome {
   isUp: boolean;
-  statusCode: number | null;
-  responseTimeMs: number;
-  error: string | null;
-  errorType: CheckErrorType | null;
-  finalUrl: string | null;
-  redirectCount: number;
-}
-
-/** Outcome of one request chain (all redirects) against a single URL. */
-class CheckFailure extends Error {
-  constructor(
-    message: string,
-    readonly errorType: CheckErrorType,
-    readonly finalUrl: string,
-    readonly redirectCount: number,
-  ) {
-    super(message);
-  }
-}
-
-/** Maps a low-level fetch/undici error to a category and a readable message. */
-function classifyError(err: unknown): { errorType: CheckErrorType; message: string } {
-  const cause = (err as { cause?: { code?: string; message?: string; errors?: Array<{ code?: string }> } })?.cause;
-  // A host with both IPv4 and IPv6 addresses fails as an AggregateError whose
-  // top-level `code` is empty — the real code is on the first inner error.
-  const code = cause?.code || cause?.errors?.[0]?.code || (err as { code?: string })?.code || '';
-  const name = (err as { name?: string })?.name ?? '';
-
-  if (name === 'AbortError' || name === 'TimeoutError' || code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') {
-    return { errorType: 'timeout', message: 'Request timed out' };
-  }
-  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
-    return { errorType: 'dns', message: 'DNS lookup failed — domain not found' };
-  }
-  if (code === 'ECONNREFUSED') {
-    return { errorType: 'connection_refused', message: 'Connection refused' };
-  }
-  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') {
-    return { errorType: 'connection_reset', message: 'Connection reset by the server' };
-  }
-  if (/^(CERT_|ERR_TLS|ERR_SSL|DEPTH_ZERO|SELF_SIGNED|UNABLE_TO_VERIFY|HOSTNAME_MISMATCH)/.test(code) || /certificate|ssl|tls/i.test(cause?.message ?? '')) {
-    return { errorType: 'tls', message: `TLS/certificate error${code ? ` (${code})` : ''}` };
-  }
-  return { errorType: 'unknown', message: err instanceof Error ? err.message : 'Unknown error' };
+  result: CheckResult;
+  regions: RegionResult[];
 }
 
 @Injectable()
@@ -101,7 +49,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ChecksService.name);
   private worker?: Worker<MonitorCheckJobData>;
   private readonly alertDispatchQueue: Queue<AlertDispatchJobData> = createAlertDispatchQueue();
-  private cachedTimeout?: { ms: number; at: number };
+  private cachedSettings?: { timeoutMs: number; locations: string[]; at: number };
 
   constructor(private readonly prisma: UptimePrismaService) {}
 
@@ -111,14 +59,14 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
       (job) => this.processMonitorCheck(job),
       {
         concurrency: MONITOR_CHECKS_CONCURRENCY,
-        // NOTE: `attempts: 2` + `backoff: { type: 'fixed', delay: 5000 }`
-        // are BullMQ *job* options, set by the PRODUCER (apps/api) when it
-        // registers each monitor's repeatable `monitor-checks` job / enqueues
-        // a one-off "check now" job — retry/backoff is configured at
-        // `Queue.add()` time, not on the Worker, and this Worker must not
-        // redeclare or fight that here. This Worker only needs to *behave*
-        // correctly under that retry policy (see isFinalAttempt below):
-        // a check counts as confirmed-down only once both attempts fail.
+        // NOTE: attempts + backoff are BullMQ *job* options, set by the
+        // PRODUCER (apps/api) when it registers each monitor's repeatable
+        // `monitor-checks` job / enqueues a one-off "check now" job —
+        // retry/backoff is configured at `Queue.add()` time, not on the
+        // Worker, and this Worker must not redeclare or fight that here.
+        // This Worker only needs to *behave* correctly under that retry
+        // policy (see isFinalAttempt below): a check counts as
+        // confirmed-down only once every allowed attempt has failed.
       }
     );
 
@@ -130,6 +78,7 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.worker?.close();
     await this.alertDispatchQueue.close();
+    await closeProxyAgents();
   }
 
   private async processMonitorCheck(job: Job<MonitorCheckJobData>): Promise<void> {
@@ -140,143 +89,136 @@ export class ChecksService implements OnModuleInit, OnModuleDestroy {
     const attemptsAllowed = job.opts.attempts ?? 1;
     const isFinalAttempt = job.attemptsMade + 1 >= attemptsAllowed;
 
-    const result = await this.performCheck(domain);
+    const outcome = await this.performCheck(domain);
 
-    if (!result.isUp && !isFinalAttempt) {
+    if (!outcome.isUp && !isFinalAttempt) {
       // Let BullMQ's native attempts/backoff retry this job — a check only
-      // counts as confirmed-down once both attempts have failed, so we
+      // counts as confirmed-down once every allowed attempt has failed, so we
       // deliberately do not write a MonitorCheck row (or run alert logic)
       // yet. Throwing here is what tells BullMQ to schedule the retry.
-      throw new Error(result.error ?? `Monitor check failed for ${domain}`);
+      throw new Error(outcome.result.error ?? `Monitor check failed for ${domain}`);
     }
 
-    await this.writeCheckResult(monitorId, result);
+    await this.writeCheckResult(monitorId, outcome);
   }
 
   /** Cached briefly — read once per ~30s, not once per check, at thousands-of-monitors scale. */
-  private async getTimeoutMs(): Promise<number> {
-    if (this.cachedTimeout && Date.now() - this.cachedTimeout.at < SETTINGS_CACHE_MS) {
-      return this.cachedTimeout.ms;
+  private async getCheckSettings(): Promise<{ timeoutMs: number; locations: string[] }> {
+    if (this.cachedSettings && Date.now() - this.cachedSettings.at < SETTINGS_CACHE_MS) {
+      return this.cachedSettings;
     }
     const settings = await this.prisma.monitoringSettings
-      .findFirst({ orderBy: { createdAt: 'asc' }, select: { timeoutSeconds: true } })
+      .findFirst({ orderBy: { createdAt: 'asc' }, select: { timeoutSeconds: true, locations: true } })
       .catch(() => null);
-    const ms = settings ? settings.timeoutSeconds * 1000 : DEFAULT_TIMEOUT_MS;
-    this.cachedTimeout = { ms, at: Date.now() };
-    return ms;
+    this.cachedSettings = {
+      timeoutMs: settings ? settings.timeoutSeconds * 1000 : DEFAULT_TIMEOUT_MS,
+      locations: settings ? settings.locations : DEFAULT_LOCATIONS,
+      at: Date.now(),
+    };
+    return this.cachedSettings;
   }
 
   /**
-   * Checks `https://<domain>` first; only if that fails at the connection/TLS
-   * level (not a timeout or DNS failure, which http would hit too) does it
-   * retry once over plain `http://`, for sites that don't serve HTTPS at all.
-   * Never throws — failures are captured into the result.
+   * One check cycle. The site is always requested from the primary location
+   * (US) first. If that succeeds the check is done — one request. Only if it
+   * fails are the other selected locations asked to confirm, and the verdict
+   * is then a vote across everyone who answered. This keeps proxy traffic at
+   * one request per check while the site is healthy, and still stops a
+   * problem local to one location from raising an alert. With the proxy off,
+   * it's a single direct request from this server. Never throws.
    */
-  private async performCheck(domain: string): Promise<CheckResult> {
-    const timeoutMs = await this.getTimeoutMs();
-    const startedAt = Date.now();
+  private async performCheck(domain: string): Promise<CheckOutcome> {
+    const { timeoutMs, locations } = await this.getCheckSettings();
 
-    try {
-      return await this.requestChain(`https://${domain}`, timeoutMs, startedAt);
-    } catch (httpsErr) {
-      const failure = httpsErr as CheckFailure;
-      const canTryHttp = ['tls', 'connection_refused', 'connection_reset'].includes(failure.errorType);
-      if (canTryHttp) {
-        try {
-          return await this.requestChain(`http://${domain}`, timeoutMs, Date.now());
-        } catch {
-          // Report the original HTTPS failure — it's the one the user cares about.
-        }
-      }
-      return {
-        isUp: false,
-        statusCode: null,
-        responseTimeMs: Date.now() - startedAt,
-        error: failure.message,
-        errorType: failure.errorType,
-        finalUrl: failure.finalUrl,
-        redirectCount: failure.redirectCount,
-      };
+    if (!isProxyEnabled()) {
+      const result = await runHttpCheck(domain, timeoutMs);
+      return { isUp: result.isUp, result, regions: [] };
     }
+
+    // US is always the primary and always checked, whatever is stored.
+    const confirmers = locations.filter((l) => l !== PRIMARY_LOCATION);
+    const check = (region: string) =>
+      runHttpCheck(domain, timeoutMs, getProxyAgent(region)).then(
+        (result): RegionResult => ({ region, result, inconclusive: result.errorType === 'proxy' }),
+      );
+
+    const primary = await check(PRIMARY_LOCATION);
+    const regions: RegionResult[] = [primary];
+
+    if (primary.inconclusive) {
+      // The proxy itself failed (bad credentials, outage, out of quota) — that
+      // says nothing about the site. Use this server's own request as the
+      // primary result instead of reporting a false outage.
+      this.logger.warn(`Proxy failed for ${PRIMARY_LOCATION} checking ${domain}; using a direct check instead`);
+      const direct = await runHttpCheck(domain, timeoutMs);
+      regions.push({ region: SERVER_LOCATION, result: direct, inconclusive: false });
+    }
+
+    const firstAnswer = regions.find((r) => !r.inconclusive) as RegionResult;
+    if (firstAnswer.result.isUp) {
+      return { isUp: true, result: firstAnswer.result, regions };
+    }
+
+    // The first answer was a failure — don't alert yet. Ask the other
+    // locations whether they see the same thing.
+    regions.push(...(await Promise.all(confirmers.map(check))));
+
+    const conclusive = regions.filter((r) => !r.inconclusive);
+    const down = conclusive.filter((r) => !r.result.isUp);
+    // Strict majority of the locations that answered must fail. A tie counts
+    // as up: one bad exit node out of two shouldn't page anyone.
+    const isUp = down.length * 2 <= conclusive.length;
+
+    if (isUp) {
+      // Report the fastest up location: every proxied request carries the
+      // proxy's own overhead (1-3s), so it's the closest to the site's real speed.
+      const fastest = conclusive
+        .filter((r) => r.result.isUp)
+        .sort((a, b) => a.result.responseTimeMs - b.result.responseTimeMs)[0];
+      return { isUp, result: fastest.result, regions };
+    }
+
+    // Through a proxy, a failure to reach the site rarely says why (an unknown
+    // domain just looks like a reset connection). When no location got an HTTP
+    // response, ask this server directly for the real reason — it's display
+    // only and never part of the vote.
+    const sample = down.find((r) => r.result.statusCode !== null) ?? down[0];
+    const diagnosis = sample.result.statusCode === null ? await runHttpCheck(domain, timeoutMs) : null;
+    const reason = diagnosis && !diagnosis.isUp ? diagnosis : sample.result;
+    const failedFrom = down.map((r) => r.region).join(', ');
+    const error = `Down from ${down.length} of ${conclusive.length} locations (${failedFrom}): ${reason.error ?? 'request failed'}`;
+    return { isUp, result: { ...reason, error }, regions };
   }
 
-  /**
-   * One request plus its whole redirect chain, followed manually so we can
-   * count hops, record the final URL, and catch loops. The timeout covers the
-   * entire chain. Throws `CheckFailure` on any transport-level problem.
-   */
-  private async requestChain(startUrl: string, timeoutMs: number, startedAt: number): Promise<CheckResult> {
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-    const visited = new Set<string>();
-    let currentUrl = startUrl;
-    let redirectCount = 0;
-
-    try {
-      for (;;) {
-        visited.add(currentUrl);
-        let response: Response;
-        try {
-          response = await fetch(currentUrl, {
-            signal: controller.signal,
-            redirect: 'manual',
-            headers: BROWSER_HEADERS,
-          });
-        } catch (err) {
-          const { errorType, message } = classifyError(err);
-          throw new CheckFailure(message, errorType, currentUrl, redirectCount);
-        }
-        // We only need the status line — free the socket instead of buffering the body.
-        void response.body?.cancel().catch(() => undefined);
-
-        const location = response.headers.get('location');
-        const isRedirect = response.status >= 300 && response.status < 400 && location;
-        if (isRedirect) {
-          const nextUrl = new URL(location, currentUrl).toString();
-          redirectCount++;
-          if (visited.has(nextUrl)) {
-            throw new CheckFailure('Redirect loop detected', 'redirect_loop', nextUrl, redirectCount);
-          }
-          if (redirectCount > MAX_REDIRECTS) {
-            throw new CheckFailure(`Too many redirects (more than ${MAX_REDIRECTS})`, 'too_many_redirects', nextUrl, redirectCount);
-          }
-          currentUrl = nextUrl;
-          continue;
-        }
-
-        // 2xx/3xx counts as up; 4xx/5xx counts as down — the site
-        // responded, but should still be flagged as an outage.
-        const isUp = response.status >= 200 && response.status < 400;
-        return {
-          isUp,
-          statusCode: response.status,
-          responseTimeMs: Date.now() - startedAt,
-          error: isUp ? null : `Non-success status ${response.status}`,
-          errorType: isUp ? null : 'http_status',
-          finalUrl: currentUrl,
-          redirectCount,
-        };
-      }
-    } finally {
-      clearTimeout(timeoutHandle);
-    }
-  }
-
-  private async writeCheckResult(monitorId: string, result: CheckResult): Promise<void> {
+  private async writeCheckResult(monitorId: string, outcome: CheckOutcome): Promise<void> {
+    const { result, regions } = outcome;
     await this.prisma.monitorCheck.create({
       data: {
         monitorId,
-        isUp: result.isUp,
+        isUp: outcome.isUp,
         statusCode: result.statusCode,
         responseTimeMs: result.responseTimeMs,
         error: result.error,
         errorType: result.errorType,
         finalUrl: result.finalUrl,
         redirectCount: result.redirectCount,
+        regions: {
+          create: regions.map((r) => ({
+            region: r.region,
+            isUp: r.result.isUp,
+            inconclusive: r.inconclusive,
+            statusCode: r.result.statusCode,
+            responseTimeMs: r.result.responseTimeMs,
+            error: r.result.error,
+            errorType: r.result.errorType,
+            finalUrl: r.result.finalUrl,
+            redirectCount: r.result.redirectCount,
+          })),
+        },
       },
     });
 
-    await this.runAlertStateMachine(monitorId, result.isUp);
+    await this.runAlertStateMachine(monitorId, outcome.isUp);
   }
 
   /**

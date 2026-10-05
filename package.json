@@ -85,7 +85,8 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "tailwind-merge": "^2.5.5",
-    "tailwindcss": "4.3.3"
+    "tailwindcss": "4.3.3",
+    "undici": "^6.29.0"
   },
   "overrides": {
     "nodemailer": "10.0.10"
