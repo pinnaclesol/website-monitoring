@@ -154,6 +154,12 @@ model MonitorCheck {
   statusCode     Int?
   responseTimeMs Int?
   error          String?
+  /// Machine-readable failure category (dns, timeout, tls, connection_refused,
+  /// connection_reset, redirect_loop, too_many_redirects, http_status, unknown).
+  errorType      String?
+  /// Where the request ended up after following redirects, and how many hops it took.
+  finalUrl       String?
+  redirectCount  Int?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -289,6 +295,13 @@ model EmailRecipient {
 model MonitoringSettings {
   id                   String   @id @default(cuid())
   checkIntervalSeconds Int      @default(60)
+  /// Per-attempt request timeout (covers the whole redirect chain).
+  timeoutSeconds       Int      @default(10)
+  /// An UP check slower than this is shown as "slow" (degraded) — display only, never alerts.
+  slowThresholdMs      Int      @default(2000)
+  /// Total attempts before a failure is confirmed (1 = no retry).
+  retryAttempts        Int      @default(2)
+  retryDelaySeconds    Int      @default(5)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

@@ -107,6 +107,10 @@ export default function SettingsPage() {
 
   const [monitoringSettings, setMonitoringSettings] = useState<MonitoringSettings | null>(null);
   const [checkInterval, setCheckInterval] = useState(60);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(10);
+  const [slowThresholdMs, setSlowThresholdMs] = useState(2000);
+  const [retryAttempts, setRetryAttempts] = useState(2);
+  const [retryDelaySeconds, setRetryDelaySeconds] = useState(5);
   const [savingMonitoring, setSavingMonitoring] = useState(false);
 
   useEffect(() => {
@@ -124,6 +128,10 @@ export default function SettingsPage() {
       .then((settings) => {
         setMonitoringSettings(settings);
         setCheckInterval(settings.checkIntervalSeconds);
+        setTimeoutSeconds(settings.timeoutSeconds);
+        setSlowThresholdMs(settings.slowThresholdMs);
+        setRetryAttempts(settings.retryAttempts);
+        setRetryDelaySeconds(settings.retryDelaySeconds);
       })
       .catch((err) => toast({ type: 'error', title: 'Could not load monitoring settings', message: err.message }));
   }, []);
@@ -181,15 +189,25 @@ export default function SettingsPage() {
   }
 
   async function saveMonitoring() {
-    if (!intervalValid) return;
+    if (!monitoringValid) return;
     setSavingMonitoring(true);
     try {
       const updated = await apiFetch<MonitoringSettings>('settings/monitoring', {
         method: 'PATCH',
-        body: JSON.stringify({ checkIntervalSeconds: checkInterval }),
+        body: JSON.stringify({
+          checkIntervalSeconds: checkInterval,
+          timeoutSeconds,
+          slowThresholdMs,
+          retryAttempts,
+          retryDelaySeconds,
+        }),
       });
       setMonitoringSettings(updated);
       setCheckInterval(updated.checkIntervalSeconds);
+      setTimeoutSeconds(updated.timeoutSeconds);
+      setSlowThresholdMs(updated.slowThresholdMs);
+      setRetryAttempts(updated.retryAttempts);
+      setRetryDelaySeconds(updated.retryDelaySeconds);
       toast({
         type: 'success',
         title: 'Monitoring settings saved',
@@ -217,6 +235,15 @@ export default function SettingsPage() {
         ? `Must be ${CHECK_INTERVAL_MAX} seconds (1 hour) or less`
         : null;
   const intervalValid = intervalError === null;
+
+  // Mirrors UpdateMonitoringSettingsDto's ranges — the API stays the real boundary.
+  const rangeError = (value: number, min: number, max: number, unit: string) =>
+    !Number.isInteger(value) || value < min || value > max ? `Whole number from ${min} to ${max} ${unit}` : null;
+  const timeoutError = rangeError(timeoutSeconds, 2, 30, 'seconds');
+  const slowError = rangeError(slowThresholdMs, 100, 60000, 'ms');
+  const attemptsError = rangeError(retryAttempts, 1, 5, 'attempts');
+  const delayError = rangeError(retryDelaySeconds, 1, 60, 'seconds');
+  const monitoringValid = intervalValid && !timeoutError && !slowError && !attemptsError && !delayError;
 
   return (
     <PermissionGate permission="settings:view">
@@ -336,8 +363,36 @@ export default function SettingsPage() {
                       {intervalError ?? 'Applies immediately to every active monitor, not just new ones'}
                     </div>
                   </div>
+                  <div className="mb-4 grid gap-4 sm:grid-cols-2">
+                    {(
+                      [
+                        ['Request timeout', timeoutSeconds, setTimeoutSeconds, timeoutError, 'seconds', 'Per attempt, including redirects'],
+                        ['Slow threshold', slowThresholdMs, setSlowThresholdMs, slowError, 'ms', 'Slower than this shows a "Slow" badge (no alert)'],
+                        ['Attempts before alerting', retryAttempts, setRetryAttempts, attemptsError, 'attempts', '1 = no retry; a failure must repeat this many times'],
+                        ['Delay between attempts', retryDelaySeconds, setRetryDelaySeconds, delayError, 'seconds', 'Wait before re-checking a failed attempt'],
+                      ] as const
+                    ).map(([label, value, setValue, error, unit, hint]) => (
+                      <div key={label}>
+                        <FieldLabel>{label}</FieldLabel>
+                        <div className="flex w-fit items-stretch">
+                          <Input
+                            type="number"
+                            value={value}
+                            onChange={(e) => setValue(Number(e.target.value))}
+                            className={`w-[100px] rounded-r-none border-r-0 ${error ? 'border-red' : ''}`}
+                            disabled={!canUpdate}
+                            aria-invalid={!!error}
+                          />
+                          <span className="flex items-center rounded rounded-l-none border border-border-strong bg-bg-muted px-3 text-[13px] text-text-muted">
+                            {unit}
+                          </span>
+                        </div>
+                        <div className={`mt-1 text-xs ${error ? 'text-red' : 'text-text-muted'}`}>{error ?? hint}</div>
+                      </div>
+                    ))}
+                  </div>
                   {canUpdate ? (
-                    <Button onClick={saveMonitoring} disabled={savingMonitoring || !intervalValid}>
+                    <Button onClick={saveMonitoring} disabled={savingMonitoring || !monitoringValid}>
                       {savingMonitoring ? 'Saving…' : 'Save monitoring settings'}
                     </Button>
                   ) : null}

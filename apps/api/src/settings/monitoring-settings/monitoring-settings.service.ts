@@ -3,7 +3,7 @@ import { UptimePrismaService } from '@uptime/uptime-db';
 import { MonitorsService } from '../../monitors/monitors.service';
 import { UpdateMonitoringSettingsDto } from './dto/update-monitoring-settings.dto';
 
-/** Singleton row: how often apps/worker checks each active Monitor. */
+/** Singleton row: how often and how apps/worker checks each active Monitor (interval, timeout, slow threshold, retries). */
 @Injectable()
 export class MonitoringSettingsService {
   constructor(
@@ -29,7 +29,13 @@ export class MonitoringSettingsService {
     // interval and won't pick up the new one on their own — re-register
     // every active one so the change is immediate, not just for monitors
     // created/resumed after this point.
-    if (updated.checkIntervalSeconds !== current.checkIntervalSeconds) {
+    // The retry policy (attempts/backoff) is baked into the same schedule,
+    // so changing it needs the same re-registration.
+    if (
+      updated.checkIntervalSeconds !== current.checkIntervalSeconds ||
+      updated.retryAttempts !== current.retryAttempts ||
+      updated.retryDelaySeconds !== current.retryDelaySeconds
+    ) {
       await this.monitorsService.rescheduleAllActive();
     }
 

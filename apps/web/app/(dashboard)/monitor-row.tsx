@@ -15,9 +15,17 @@ import {
 } from '@uptime/ui';
 import { apiFetch } from '../../lib/api-client';
 import { timeAgo, responseTimeClass, formatResponseTime, uptimeColorClass, stripProtocol } from '../../lib/format';
-import { monitorStatus, type MonitorWithStatus } from '../../lib/types';
+import { isSlowMonitor, monitorStatus, type MonitorWithStatus } from '../../lib/types';
 
 const HISTORY_SIZE = 30;
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return url;
+  }
+}
 
 function padHistory(history: Array<'up' | 'down'>): HistoryStatus[] {
   const padded: HistoryStatus[] = Array(Math.max(0, HISTORY_SIZE - history.length)).fill('unknown');
@@ -86,6 +94,14 @@ export function MonitorRow({
   const status = monitorStatus(monitor);
   const urlShort = stripProtocol(monitor.domain);
   const rt = monitor.latestCheck?.responseTimeMs ?? null;
+  const slow = isSlowMonitor(monitor);
+  // Only worth showing when the site really ended up somewhere other than the
+  // address we monitor (a plain http→https or www hop to the same host isn't news).
+  const finalUrl = monitor.latestCheck?.finalUrl ?? null;
+  const redirectedTo =
+    finalUrl && (monitor.latestCheck?.redirectCount ?? 0) > 0 && hostOf(finalUrl) !== hostOf(`https://${monitor.domain}`)
+      ? finalUrl
+      : null;
 
   async function togglePause(nextEnabled: boolean) {
     try {
@@ -160,9 +176,26 @@ export function MonitorRow({
           {urlShort}
           <ExternalLinkIcon />
         </a>
+        {redirectedTo ? (
+          <div
+            className="max-w-[260px] truncate font-mono text-[11px] text-text-subtle"
+            title={`Redirects (${monitor.latestCheck?.redirectCount}×) to ${redirectedTo}`}
+          >
+            → {stripProtocol(redirectedTo)}
+          </div>
+        ) : null}
       </td>
       <td className="px-5 py-2.5">
-        <Badge status={status} label={STATUS_LABEL[status]} />
+        {slow ? (
+          <Badge status="slow" label="Slow" title={`Responded in ${formatResponseTime(rt ?? 0)} — slower than the threshold in Settings`} />
+        ) : (
+          <Badge status={status} label={STATUS_LABEL[status]} />
+        )}
+        {status === 'down' && monitor.latestCheck?.error ? (
+          <div className="mt-1 max-w-[220px] truncate text-xs text-text-muted" title={monitor.latestCheck.error}>
+            {monitor.latestCheck.error}
+          </div>
+        ) : null}
       </td>
       <td className="px-5 py-2.5">
         {rt === null ? (
