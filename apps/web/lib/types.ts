@@ -15,6 +15,11 @@ export interface MonitorWithStatus {
     responseTimeMs: number;
     timestamp: string;
     error: string | null;
+    errorType: string | null;
+    finalUrl: string | null;
+    redirectCount: number | null;
+    /** Up, but slower than the configured slow threshold (display only). */
+    isSlow: boolean;
   } | null;
   history: Array<'up' | 'down'>;
   uptime24h: number | null;
@@ -22,6 +27,11 @@ export interface MonitorWithStatus {
 }
 
 export type MonitorStatus = 'up' | 'down' | 'paused' | 'checking';
+
+/** Only affects the badge — slow monitors still count as `up` everywhere else (filters, stats, alerts). */
+export function isSlowMonitor(monitor: MonitorWithStatus): boolean {
+  return monitorStatus(monitor) === 'up' && monitor.latestCheck?.isSlow === true;
+}
 
 export function monitorStatus(monitor: MonitorWithStatus): MonitorStatus {
   if (monitor.isPaused) return 'paused';
@@ -90,6 +100,10 @@ export interface AlertSettings {
 export interface MonitoringSettings {
   id: string;
   checkIntervalSeconds: number;
+  timeoutSeconds: number;
+  slowThresholdMs: number;
+  retryAttempts: number;
+  retryDelaySeconds: number;
 }
 
 export interface TelegramAccount {

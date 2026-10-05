@@ -16,6 +16,8 @@ const badgeVariants = cva(
         down: 'border-red-border bg-red-bg text-red',
         paused: 'border-yellow-border bg-yellow-bg text-yellow',
         checking: 'border-blue-border bg-blue-bg text-blue',
+        // Up, but slower than the configured threshold — same tokens as `paused`.
+        slow: 'border-yellow-border bg-yellow-bg text-yellow',
       },
     },
     defaultVariants: {
@@ -31,6 +33,7 @@ const dotVariants = cva('size-1.5 shrink-0 rounded-full', {
       down: 'bg-red',
       paused: 'bg-yellow',
       checking: 'bg-blue animate-pulse',
+      slow: 'bg-yellow',
     },
   },
   defaultVariants: {

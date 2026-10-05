@@ -198,7 +198,7 @@ export class MonitorsService {
     const monitorIds = monitors.map((m) => m.id);
     const windowStart = new Date(Date.now() - UPTIME_WINDOW_MS);
 
-    const [checks, openIncidentCounts, windowIncidents] = await Promise.all([
+    const [checks, openIncidentCounts, windowIncidents, monitoringSettings] = await Promise.all([
       this.prisma.monitorCheck.findMany({
         where: { monitorId: { in: monitorIds } },
         orderBy: { timestamp: 'desc' },
@@ -219,7 +219,9 @@ export class MonitorsService {
         },
         select: { monitorId: true, startedAt: true, endedAt: true },
       }),
+      this.prisma.monitoringSettings.findFirst({ orderBy: { createdAt: 'asc' }, select: { slowThresholdMs: true } }),
     ]);
+    const slowThresholdMs = monitoringSettings?.slowThresholdMs ?? 2000;
 
     const checksByMonitor = new Map<string, typeof checks>();
     for (const check of checks) {
@@ -289,6 +291,12 @@ export class MonitorsService {
               responseTimeMs: latestCheck.responseTimeMs,
               timestamp: latestCheck.timestamp,
               error: latestCheck.error,
+              errorType: latestCheck.errorType,
+              finalUrl: latestCheck.finalUrl,
+              redirectCount: latestCheck.redirectCount,
+              // Derived at read time (no stored flag) so changing the
+              // threshold in Settings applies to existing checks too.
+              isSlow: latestCheck.isUp && (latestCheck.responseTimeMs ?? 0) > slowThresholdMs,
             }
           : null,
         history,
@@ -440,25 +448,33 @@ export class MonitorsService {
    * `rescheduleAllActive()`, which fetches MonitoringSettings once and
    * passes it to every monitor instead of each one querying it separately.
    */
-  private async registerRepeatableCheck(monitorId: string, domain: string, intervalMs?: number): Promise<void> {
-    const checkIntervalMs = intervalMs ?? (await this.getCheckIntervalMs());
+  private async registerRepeatableCheck(
+    monitorId: string,
+    domain: string,
+    schedule?: Awaited<ReturnType<MonitorsService['getScheduleSettings']>>,
+  ): Promise<void> {
+    const { intervalMs, attempts, backoffMs } = schedule ?? (await this.getScheduleSettings());
     const jitterOffsetMs = Math.floor(Math.random() * MONITOR_CHECK_JITTER_MS);
 
     await this.monitorChecksQueue.upsertJobScheduler(
       monitorCheckJobId(monitorId),
-      { every: checkIntervalMs, startDate: Date.now() + jitterOffsetMs },
+      { every: intervalMs, startDate: Date.now() + jitterOffsetMs },
       {
         name: MONITOR_CHECK_JOB_NAME,
         data: { monitorId, domain },
-        opts: { attempts: 2, backoff: { type: 'fixed', delay: 5000 } },
+        opts: { attempts, backoff: { type: 'fixed', delay: backoffMs } },
       },
     );
   }
 
   /** Always read fresh from the DB (never cache/hardcode) — same discipline as apps/worker's alert-dispatch config reads. */
-  private async getCheckIntervalMs(): Promise<number> {
+  private async getScheduleSettings() {
     const settings = await this.prisma.monitoringSettings.findFirst({ orderBy: { createdAt: 'asc' } });
-    return (settings?.checkIntervalSeconds ?? 60) * 1000;
+    return {
+      intervalMs: (settings?.checkIntervalSeconds ?? 60) * 1000,
+      attempts: settings?.retryAttempts ?? 2,
+      backoffMs: (settings?.retryDelaySeconds ?? 5) * 1000,
+    };
   }
 
   /**
@@ -470,14 +486,14 @@ export class MonitorsService {
    * interval whenever it's next resumed).
    */
   async rescheduleAllActive(): Promise<void> {
-    const [monitors, intervalMs] = await Promise.all([
+    const [monitors, schedule] = await Promise.all([
       this.prisma.monitor.findMany({
         where: { deletedAt: null, isPaused: false },
         select: { id: true, domain: true },
       }),
-      this.getCheckIntervalMs(),
+      this.getScheduleSettings(),
     ]);
-    await Promise.all(monitors.map((m) => this.registerRepeatableCheck(m.id, m.domain, intervalMs)));
+    await Promise.all(monitors.map((m) => this.registerRepeatableCheck(m.id, m.domain, schedule)));
   }
 
   private async removeRepeatableCheck(monitorId: string): Promise<void> {
