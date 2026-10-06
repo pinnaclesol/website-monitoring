@@ -24,7 +24,7 @@ COPY libs/uptime-db/package.json libs/uptime-db/package.json
 # dev/production CMDs).
 COPY libs/uptime-db/prisma libs/uptime-db/prisma
 
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 
 FROM deps AS dev
@@ -35,6 +35,11 @@ CMD ["npx", "nx", "serve", "worker"]
 
 
 FROM deps AS build
+# Cap Node's heap and skip the Nx daemon so a build can't take the whole
+# VPS down with it (it fails cleanly instead). Raise with --build-arg
+# NODE_BUILD_MEMORY=... if a build legitimately needs more.
+ARG NODE_BUILD_MEMORY=1536
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_BUILD_MEMORY} NX_DAEMON=false
 COPY . .
 # Must be `nx build worker`, not apps/worker/package.json's own "build":
 # "nest build" script — same @uptime/* webpack-externals-override reasoning
@@ -59,7 +64,7 @@ COPY libs/ui/package.json libs/ui/package.json
 COPY libs/uptime-db/package.json libs/uptime-db/package.json
 # --ignore-scripts: same reasoning as Dockerfile.api's production stage —
 # the built Prisma client is copied straight from the `build` stage below.
-RUN npm ci --omit=dev --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY --from=build /app/dist/apps/worker ./dist/apps/worker
 COPY --from=build /app/libs/uptime-db/prisma ./libs/uptime-db/prisma

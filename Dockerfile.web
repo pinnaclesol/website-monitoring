@@ -17,7 +17,7 @@ COPY libs/queue/package.json libs/queue/package.json
 COPY libs/ui/package.json libs/ui/package.json
 COPY libs/uptime-db/package.json libs/uptime-db/package.json
 
-RUN npm ci --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --ignore-scripts --no-audit --no-fund
 
 
 FROM deps AS dev
@@ -32,6 +32,12 @@ CMD ["npx", "nx", "dev", "web"]
 
 
 FROM deps AS build
+# Cap Node's heap and skip the Nx daemon so a build can't take the whole
+# VPS down with it (it fails cleanly instead). Raise with --build-arg
+# NODE_BUILD_MEMORY=... if a build legitimately needs more.
+ARG NODE_BUILD_MEMORY=1536
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_BUILD_MEMORY} NX_DAEMON=false
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
 RUN npx nx build web
 
@@ -51,7 +57,7 @@ COPY libs/auth/package.json libs/auth/package.json
 COPY libs/queue/package.json libs/queue/package.json
 COPY libs/ui/package.json libs/ui/package.json
 COPY libs/uptime-db/package.json libs/uptime-db/package.json
-RUN npm ci --omit=dev --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY --from=build /app/apps/web/.next ./apps/web/.next
 COPY --from=build /app/apps/web/public ./apps/web/public

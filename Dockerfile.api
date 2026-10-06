@@ -32,7 +32,7 @@ COPY libs/uptime-db/package.json libs/uptime-db/package.json
 # build environment, not be copied in from the host.
 COPY libs/uptime-db/prisma libs/uptime-db/prisma
 
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 
 FROM deps AS dev
@@ -52,6 +52,11 @@ CMD ["sh", "-c", "npx prisma migrate deploy --schema=libs/uptime-db/prisma/schem
 
 
 FROM deps AS build
+# Cap Node's heap and skip the Nx daemon so a build can't take the whole
+# VPS down with it (it fails cleanly instead). Raise with --build-arg
+# NODE_BUILD_MEMORY=... if a build legitimately needs more.
+ARG NODE_BUILD_MEMORY=1536
+ENV NODE_OPTIONS=--max-old-space-size=${NODE_BUILD_MEMORY} NX_DAEMON=false
 COPY . .
 # Must be `nx build api`, not apps/api/package.json's own "build": "nest
 # build" script — the latter skips the webpack @uptime/* override and
@@ -81,7 +86,7 @@ COPY libs/uptime-db/package.json libs/uptime-db/package.json
 # engine) is copied straight from the `build` stage below — no need for
 # `npm ci`'s postinstall hook to regenerate it here too (and without this,
 # it would fail anyway: the schema file isn't copied into this fresh stage).
-RUN npm ci --omit=dev --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 COPY --from=build /app/dist/apps/api ./dist/apps/api
 COPY --from=build /app/libs/uptime-db/prisma ./libs/uptime-db/prisma
